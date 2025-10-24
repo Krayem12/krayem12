@@ -707,21 +707,27 @@ class SignalHandler:
             print("⚠️  تحذير: لم يتم تحميل أي إشارات من ملف .env!")
     
     def parse_signal(self, raw_signal: str) -> Optional[Dict]:
-        """تحليل الإشارة"""
+        """تحليل الإشارة - الصيغة الجديدة فقط"""
         try:
-            pattern = r'(.+?)\s*\|\s*(.+?)\s*\|\s*(OPEN|CLOSE)\s*\|\s*(OPEN|CLOSE)'
-            match = re.match(pattern, raw_signal.strip())
+            # تنظيف الإشارة من الفراغات الزائدة
+            cleaned_signal = ' '.join(raw_signal.split())
+            
+            # الصيغة الجديدة: "Ticker : ... Signal : ... Open : ... Close : ..."
+            pattern = r'Ticker\s*:\s*(.+?)\s+Signal\s*:\s*(.+?)\s+Open\s*:\s*(.+?)\s+Close\s*:\s*(.+)'
+            match = re.match(pattern, cleaned_signal)
             
             if not match:
-                raise ValueError(f"صيغة الإشارة غير صالحة: {raw_signal}")
+                raise ValueError(f"صيغة الإشارة غير صالحة. التنسيق المتوقع: Ticker : SYMBOL Signal : SIGNAL Open : PRICE Close : PRICE")
             
-            ticker, signal_type, open_status, close_status = match.groups()
+            ticker, signal_type, open_price, close_price = match.groups()
             
             return {
                 'ticker': ticker.strip(),
                 'signal_type': signal_type.strip(),
-                'open_status': open_status.strip(),
-                'close_status': close_status.strip(),
+                'open_status': "OPEN",
+                'close_status': "CLOSE",
+                'open_price': open_price.strip(),
+                'close_price': close_price.strip(),
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'source': 'TradingView'
             }
@@ -988,22 +994,20 @@ def _get_test_page():
     <body>
         <div class="container">
             <h1>🧪 اختبار نظام إشارات التداول - المنفذ 10000</h1>
-            <p>أدخل إشارة بصيغة: <code>TICKER | SIGNAL_TYPE | OPEN | CLOSE</code></p>
+            <p>أدخل إشارة بصيغة: <code>Ticker : SYMBOL Signal : SIGNAL Open : PRICE Close : PRICE</code></p>
             
             <form method="POST">
-                <textarea name="signal" placeholder="SPX500 | bullish_sbos_buy | OPEN | CLOSE" required>SPX500 | bullish_catcher | OPEN | CLOSE</textarea>
+                <textarea name="signal" placeholder="Ticker : BTCUSDT Signal : bullish_catcher Open : 110000 Close : 110100" required>Ticker : BTCUSDT Signal : bullish_catcher Open : 110000 Close : 110100</textarea>
                 <br>
                 <button type="submit">إرسال الإشارة</button>
             </form>
             
             <div>
-                <h3>📋 أمثلة للإشارات بأنماط الرسائل الجديدة:</h3>
+                <h3>📋 أمثلة للإشارات:</h3>
                 <ul>
-                    <li><strong>✦✦✦ دخول صفقة:</strong> <code>SPX500 | bullish_sbos_buy | OPEN | CLOSE</code></li>
-                    <li><strong>✅ تأكيد اتجاه:</strong> <code>SPX500 | bullish_tracer | OPEN | CLOSE</code></li>
-                    <li><strong>════ خروج صفقة:</strong> <code>SPX500 | exit_buy | CLOSE | OPEN</code></li>
-                    <li><strong>☰☰☰ اتجاه عام:</strong> <code>SPX500 | bullish_catcher | OPEN | CLOSE</code></li>
-                    <li><strong>🔔 إشارة تأكيد:</strong> <code>SPX500 | bullish_confirmation+ | OPEN | CLOSE</code></li>
+                    <li><strong>إشارة اتجاه:</strong> <code>Ticker : BTCUSDT Signal : bullish_catcher Open : 110000 Close : 110100</code></li>
+                    <li><strong>إشارة دخول:</strong> <code>Ticker : BTCUSDT Signal : bullish_sbos_buy Open : 110000 Close : 110100</code></li>
+                    <li><strong>إشارة خروج:</strong> <code>Ticker : BTCUSDT Signal : exit_buy Open : 110000 Close : 110100</code></li>
                 </ul>
             </div>
         </div>
@@ -1042,13 +1046,14 @@ def _handle_test_post(request):
         '''
 
 def _convert_json_to_signal(data):
-    """تحويل JSON إلى إشارة نصية"""
+    """تحويل JSON إلى إشارة نصية بالصيغة الجديدة"""
     try:
         if isinstance(data, dict):
             ticker = data.get('ticker', data.get('symbol', 'UNKNOWN'))
             signal_type = data.get('signal', data.get('action', 'UNKNOWN'))
-            status = data.get('status', 'OPEN')
-            return f"{ticker} | {signal_type} | {status} | CLOSE"
+            open_price = str(data.get('open', '0'))
+            close_price = str(data.get('close', '0'))
+            return f"Ticker : {ticker} Signal : {signal_type} Open : {open_price} Close : {close_price}"
         else:
             return str(data)
     except Exception as e:
