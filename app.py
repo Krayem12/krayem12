@@ -54,11 +54,12 @@ class Config:
         self.RESET_TRADES_ON_TREND_CHANGE = config('RESET_TRADES_ON_TREND_CHANGE', default=False, cast=bool)
         
         # قوائم الإشارات - جميعها تقرأ من ملف .env
-        self.TREND_SIGNALS = self._parse_signal_list(config('TREND_SIGNALS', default=''))
-        self.TREND_CONFIRM_SIGNALS = self._parse_signal_list(config('TREND_CONFIRM_SIGNALS', default=''))
-        self.ENTRY_SIGNALS_BULLISH = self._parse_signal_list(config('ENTRY_SIGNALS_BULLISH', default=''))
-        self.ENTRY_SIGNALS_BEARISH = self._parse_signal_list(config('ENTRY_SIGNALS_BEARISH', default=''))
-        self.EXIT_SIGNALS = self._parse_signal_list(config('EXIT_SIGNALS', default=''))
+        self.TREND_SIGNALS = self._parse_signal_list(config('TREND_SIGNALS', default='bullish_catcher,bearish_catcher'))
+        self.TREND_CONFIRM_SIGNALS = self._parse_signal_list(config('TREND_CONFIRM_SIGNALS', default='bullish_tracer,bearish_tracer,bullish_catcher_and_tracer,bearish_catcher_and_tracer'))
+        self.ENTRY_SIGNALS_BULLISH = self._parse_signal_list(config('ENTRY_SIGNALS_BULLISH', default='bullish_sbos_buy,bullish_schoch_buy,bullish_grab_buy,discount_exit_call,bullish_confirmation+,bullish_catcher_cross_over_tracer,bullish_moneyflow_co_50,bullish_hyperwave_co_50,bullish_switch_tracer,Strong bullish confluence,Bullish New Imbalance,Bullish Turn +,Bullish overflow'))
+        self.ENTRY_SIGNALS_BEARISH = self._parse_signal_list(config('ENTRY_SIGNALS_BEARISH', default='bearish_moneyflow_cu_50,bearish_hyperwave_cu_50,bearish_switch_tracer,Within Bearish Imbalance,Bearish New Imbalance,Hyper Wave oscillator downward signal'))
+        self.EXIT_SIGNALS = self._parse_signal_list(config('EXIT_SIGNALS', default='exit_buy,exit_sell,Bullish Imbalance Exited,Bearish Imbalance Exited,Bearish Imbalance Mitigated'))
+        self.GENERAL_SIGNALS = self._parse_signal_list(config('GENERAL_SIGNALS', default='Within Bullish Imbalance'))
         self.ALL_SIGNALS = self._get_all_signals()
     
     def _parse_signal_list(self, signal_str: str) -> list:
@@ -76,6 +77,7 @@ class Config:
         all_signals.extend(self.ENTRY_SIGNALS_BULLISH)
         all_signals.extend(self.ENTRY_SIGNALS_BEARISH)
         all_signals.extend(self.EXIT_SIGNALS)
+        all_signals.extend(self.GENERAL_SIGNALS)
         return all_signals
 
 # ✉️ مُنسق الرسائل المدمج - النماذج الجديدة
@@ -89,10 +91,10 @@ class MessageFormatter:
         signal_type = signal_data['signal_type']
         
         # تحديد الاتجاه بناءً على نوع الإشارة
-        if 'bullish' in signal_type:
+        if 'bullish' in signal_type.lower():
             trend_icon = "🟢📈"
             trend_text = "شراء (اتجاه صاعد)"
-        elif 'bearish' in signal_type:
+        elif 'bearish' in signal_type.lower():
             trend_icon = "🔴📉"
             trend_text = "بيع (اتجاه هابط)"
         else:
@@ -175,10 +177,10 @@ class MessageFormatter:
         signal_type = signal_data['signal_type']
         
         # تحديد الاتجاه المؤكد
-        if 'bullish' in signal_type or current_trend == 'BULLISH':
+        if 'bullish' in signal_type.lower() or current_trend == 'BULLISH':
             trend_icon = "🟢📈"
             trend_text = "شراء (اتجاه صاعد)"
-        elif 'bearish' in signal_type or current_trend == 'BEARISH':
+        elif 'bearish' in signal_type.lower() or current_trend == 'BEARISH':
             trend_icon = "🔴📉"
             trend_text = "بيع (اتجاه هابط)"
         else:
@@ -362,6 +364,8 @@ class ConfirmationManager:
             return self._handle_entry_signal(signal_data, signal_key)
         elif category == 'TREND_CONFIRM_SIGNALS':
             return self._handle_confirmation_signal(signal_data)
+        elif category == 'GENERAL_SIGNALS':
+            return {'status': 'general_signal', 'message': 'إشارة عامة - للمراقبة فقط'}
         else:
             return {'status': 'ignored', 'reason': 'unknown_signal_type'}
     
@@ -377,16 +381,37 @@ class ConfirmationManager:
             return 'ENTRY_SIGNALS_BULLISH'
         elif signal_type in self.config.ENTRY_SIGNALS_BEARISH:
             return 'ENTRY_SIGNALS_BEARISH'
+        elif signal_type in self.config.EXIT_SIGNALS:
+            return 'EXIT_SIGNALS'
+        elif signal_type in self.config.GENERAL_SIGNALS:
+            return 'GENERAL_SIGNALS'
         else:
+            # محاولة مطابقة جزئية
+            for trend_signal in self.config.TREND_SIGNALS:
+                if trend_signal.lower() in signal_type.lower():
+                    return 'TREND_SIGNALS'
+            
+            for bull_signal in self.config.ENTRY_SIGNALS_BULLISH:
+                if bull_signal.lower() in signal_type.lower():
+                    return 'ENTRY_SIGNALS_BULLISH'
+            
+            for bear_signal in self.config.ENTRY_SIGNALS_BEARISH:
+                if bear_signal.lower() in signal_type.lower():
+                    return 'ENTRY_SIGNALS_BEARISH'
+            
+            for exit_signal in self.config.EXIT_SIGNALS:
+                if exit_signal.lower() in signal_type.lower():
+                    return 'EXIT_SIGNALS'
+            
             return 'UNKNOWN'
     
     def _handle_trend_signal(self, signal_data: Dict) -> Dict:
         """معالجة إشارات الاتجاه"""
         signal_type = signal_data['signal_type']
         
-        if 'bullish' in signal_type:
+        if 'bullish' in signal_type.lower():
             self.current_trend = 'BULLISH'
-        elif 'bearish' in signal_type:
+        elif 'bearish' in signal_type.lower():
             self.current_trend = 'BEARISH'
         
         self.trend_signals.append({
@@ -494,6 +519,8 @@ class TradeManager:
                 return self._open_confirmed_trade(signal_data, confirmation_result)
             elif confirmation_result['status'] == 'trend_updated':
                 return self._handle_trend_change(confirmation_result)
+            elif confirmation_result['status'] == 'general_signal':
+                return {'status': 'general', 'message': 'إشارة عامة - للمراقبة فقط'}
             else:
                 return {
                     'status': 'pending',
@@ -649,7 +676,13 @@ class TradeManager:
         elif signal_type in self.config.ENTRY_SIGNALS_BEARISH:
             return 'PUT'
         else:
-            return 'UNKNOWN'
+            # محاولة تحديد الاتجاه بناءً على اسم الإشارة
+            if 'bullish' in signal_type.lower() or 'buy' in signal_type.lower():
+                return 'CALL'
+            elif 'bearish' in signal_type.lower() or 'sell' in signal_type.lower():
+                return 'PUT'
+            else:
+                return 'UNKNOWN'
     
     def _find_active_trade(self, ticker: str) -> Optional[Dict]:
         """البحث عن صفقة نشطة"""
@@ -692,6 +725,7 @@ class SignalHandler:
         print(f"   ✅ 📊 تأكيد الاتجاه")  
         print(f"   ════ إشارة الخروج")
         print(f"   ☰☰☰ الاتجاه العام")
+        print(f"   🔔 إشارة عامة")
     
     def _display_loaded_signals(self):
         """عرض الإشارات المحملة من .env"""
@@ -701,6 +735,7 @@ class SignalHandler:
         print(f"   🟢 إشارات الدخول الشرائية: {len(self.config.ENTRY_SIGNALS_BULLISH)} إشارة")
         print(f"   🔴 إشارات الدخول البيعية: {len(self.config.ENTRY_SIGNALS_BEARISH)} إشارة")
         print(f"   🚪 إشارات الخروج: {len(self.config.EXIT_SIGNALS)} إشارة")
+        print(f"   🔔 إشارات عامة: {len(self.config.GENERAL_SIGNALS)} إشارة")
         print(f"   📈 إجمالي الإشارات: {len(self.config.ALL_SIGNALS)} إشارة")
         
         if len(self.config.ALL_SIGNALS) == 0:
@@ -717,9 +752,26 @@ class SignalHandler:
             match = re.match(pattern, cleaned_signal)
             
             if not match:
-                raise ValueError(f"صيغة الإشارة غير صالحة. التنسيق المتوقع: Ticker : SYMBOL Signal : SIGNAL Open : PRICE Close : PRICE")
-            
-            ticker, signal_type, open_price, close_price = match.groups()
+                # إذا كانت الإشارة بالصيغة القديمة، حاول تحويلها
+                if '|' in cleaned_signal:
+                    parts = [part.strip() for part in cleaned_signal.split('|')]
+                    if len(parts) >= 2:
+                        ticker = parts[0]
+                        signal_type = parts[1]
+                        open_price = parts[2] if len(parts) > 2 else "0"
+                        close_price = parts[3] if len(parts) > 3 else "0"
+                        print(f"⚠️  تم تحويل الإشارة من الصيغة القديمة: {signal_type}")
+                    else:
+                        raise ValueError(f"صيغة الإشارة غير صالحة. التنسيق المتوقع: Ticker : SYMBOL Signal : SIGNAL Open : PRICE Close : PRICE")
+                else:
+                    # إذا كانت مجرد اسم إشارة، استخدم قيم افتراضية
+                    signal_type = cleaned_signal
+                    ticker = "BTCUSDT"
+                    open_price = "0"
+                    close_price = "0"
+                    print(f"⚠️  تم معالجة الإشارة المختصرة: {signal_type}")
+            else:
+                ticker, signal_type, open_price, close_price = match.groups()
             
             return {
                 'ticker': ticker.strip(),
@@ -736,7 +788,7 @@ class SignalHandler:
             return None
     
     def classify_signal(self, signal_data: Dict) -> Tuple[str, str]:
-        """تصنيف الإشارة"""
+        """تصنيف الإشارة مع دعم المطابقة الجزئية"""
         signal_type = signal_data['signal_type']
         
         signal_categories = {
@@ -744,12 +796,21 @@ class SignalHandler:
             'TREND_CONFIRM_SIGNALS': self.config.TREND_CONFIRM_SIGNALS,
             'ENTRY_SIGNALS_BULLISH': self.config.ENTRY_SIGNALS_BULLISH,
             'ENTRY_SIGNALS_BEARISH': self.config.ENTRY_SIGNALS_BEARISH,
-            'EXIT_SIGNALS': self.config.EXIT_SIGNALS
+            'EXIT_SIGNALS': self.config.EXIT_SIGNALS,
+            'GENERAL_SIGNALS': self.config.GENERAL_SIGNALS
         }
         
+        # البحث عن مطابقة تامة أولاً
         for category, signals in signal_categories.items():
             if signal_type in signals:
                 return category, self._get_category_description(category)
+        
+        # إذا لم توجد مطابقة تامة، ابحث عن مطابقة جزئية
+        for category, signals in signal_categories.items():
+            for signal in signals:
+                if signal.lower() in signal_type.lower() or signal_type.lower() in signal.lower():
+                    print(f"🎯 تمت مطابقة جزئية: {signal_type} -> {signal}")
+                    return category, self._get_category_description(category)
         
         return 'UNKNOWN', 'إشارة غير معروفة'
     
@@ -760,7 +821,8 @@ class SignalHandler:
             'TREND_CONFIRM_SIGNALS': 'تأكيد الاتجاه الحالي',
             'ENTRY_SIGNALS_BULLISH': 'دخول صفقة شراء (CALL)',
             'ENTRY_SIGNALS_BEARISH': 'دخول صفقة بيع (PUT)',
-            'EXIT_SIGNALS': 'خروج من الصفقات'
+            'EXIT_SIGNALS': 'خروج من الصفقات',
+            'GENERAL_SIGNALS': 'إشارة عامة (مراقبة فقط)'
         }
         return descriptions.get(category, 'غير معروف')
     
@@ -793,17 +855,26 @@ class SignalHandler:
                 print(f"📊 نتيجة تأكيد الاتجاه: {result['status']} - {result.get('message', '')}")
                 return True
             
-            # معالجة باقي أنواع الإشارات
+            # معالجة إشارات الخروج
             elif category == 'EXIT_SIGNALS':
                 result = self.trade_manager.close_trade(signal_data)
                 print(f"📊 نتيجة إغلاق الصفقة: {result['status']} - {result.get('message', '')}")
                 return result['status'] != 'error'
+            
+            # معالجة الإشارات العامة
+            elif category == 'GENERAL_SIGNALS':
+                message = self.message_formatter.format_general_signal(signal_data)
+                self.notification_manager.send_message(message, signal_data)
+                print(f"📊 إشارة عامة: {signal_data['signal_type']}")
+                return True
+            
+            # معالجة باقي أنواع الإشارات
             else:
                 result = self.trade_manager.process_signal(signal_data)
                 print(f"📊 نتيجة المعالجة: {result['status']} - {result.get('message', '')}")
                 
                 # إرسال إشعار عام للإشارات غير المرتبطة بالصفقات
-                if result['status'] in ['pending', 'trend_updated']:
+                if result['status'] in ['pending', 'trend_updated', 'general']:
                     message = self.message_formatter.format_general_signal(signal_data)
                     self.notification_manager.send_message(message, signal_data)
                 
@@ -824,6 +895,7 @@ class SignalHandler:
                 'ENTRY_SIGNALS_BULLISH': len(self.config.ENTRY_SIGNALS_BULLISH),
                 'ENTRY_SIGNALS_BEARISH': len(self.config.ENTRY_SIGNALS_BEARISH),
                 'EXIT_SIGNALS': len(self.config.EXIT_SIGNALS),
+                'GENERAL_SIGNALS': len(self.config.GENERAL_SIGNALS),
                 'TOTAL_SIGNALS': len(self.config.ALL_SIGNALS)
             },
             'telegram_enabled': self.config.TELEGRAM_ENABLED,
@@ -1006,8 +1078,9 @@ def _get_test_page():
                 <h3>📋 أمثلة للإشارات:</h3>
                 <ul>
                     <li><strong>إشارة اتجاه:</strong> <code>Ticker : BTCUSDT Signal : bullish_catcher Open : 110000 Close : 110100</code></li>
-                    <li><strong>إشارة دخول:</strong> <code>Ticker : BTCUSDT Signal : bullish_sbos_buy Open : 110000 Close : 110100</code></li>
+                    <li><strong>إشارة دخول:</strong> <code>Ticker : BTCUSDT Signal : Strong bullish confluence Open : 110000 Close : 110100</code></li>
                     <li><strong>إشارة خروج:</strong> <code>Ticker : BTCUSDT Signal : exit_buy Open : 110000 Close : 110100</code></li>
+                    <li><strong>إشارة عامة:</strong> <code>Ticker : BTCUSDT Signal : Within Bullish Imbalance Open : 110000 Close : 110100</code></li>
                 </ul>
             </div>
         </div>
