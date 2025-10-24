@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-نظام معالجة إشارات التداول - النسخة المعدلة للتشغيل على Render
+نظام معالجة إشارات التداول - النسخة المعدلة مع نماذج الرسائل المحسنة
 """
 
 import os
@@ -273,10 +273,10 @@ class TradingSystem:
         
         if 'bullish' in signal_type.lower():
             new_trend = 'BULLISH'
-            trend_icon, trend_text = "🟢📈", "اتجاه صاعد"
+            trend_icon, trend_text = "🟢📈", "شراء (اتجاه صاعد)"
         elif 'bearish' in signal_type.lower():
             new_trend = 'BEARISH'
-            trend_icon, trend_text = "🔴📉", "اتجاه هابط"
+            trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
         else:
             return False
         
@@ -349,7 +349,7 @@ class TradingSystem:
         
         self.active_trades[trade_id] = trade_info
         
-        # إرسال إشعار الدخول
+        # إرسال إشعار الدخول بالنموذج المطلوب
         if self.should_send_message('entry', trade_info):
             message = self.format_entry_message(trade_info, pending_data)
             self.send_telegram(message)
@@ -457,58 +457,132 @@ class TradingSystem:
             self.logger.error(f"❌ خطأ في إرسال Telegram: {e}")
             return False
     
-    # 🔧 دوال تنسيق الرسائل
+    # 🔧 دوال تنسيق الرسائل - محدثة حسب الطلب
     def format_trend_message(self, signal_data, trend_icon, trend_text):
         """تنسيق رسالة الاتجاه"""
         return f"""
-📊 الاتجاه العام
-💰 الرمز: {signal_data['ticker']}
-📈 الاتجاه: {trend_icon} {trend_text}
-📋 الإشارة: {signal_data['signal_type']}
+☰☰☰ 📊 الاتجاه العام ☰☰☰
+┏━━━━━━━━━━━━━━━━━━━━
+┃ 💰 الرمز: {signal_data['ticker']}
+┃ 📈 الاتجاه: {trend_icon} {trend_text}
+┃ 📋 الإشارة: {signal_data['signal_type']}
+┃ 🔄 الحالة: الاتجاه العام محدث
+┗━━━━━━━━━━━━━━━━━━━━
 🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """.strip()
     
     def format_entry_message(self, trade_info, confirmation_data):
-        """تنسيق رسالة دخول الصفقة"""
-        if trade_info['direction'] == 'CALL':
+        """تنسيق رسالة دخول الصفقة بالنموذج المطلوب"""
+        ticker = trade_info['ticker']
+        direction = trade_info['direction']
+        
+        if direction == 'CALL':
             direction_icon, direction_text = "🟢", "شراء"
+            trend_icon, trend_text = "🟢📈", "شراء (اتجاه صاعد)"
         else:
             direction_icon, direction_text = "🔴", "بيع"
+            trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
         
-        return f"""
-🚀 دخول صفقة
-💰 الرمز: {trade_info['ticker']}
-🎯 النوع: {direction_icon} {direction_text}
-✅ تم التأكيد بـ {trade_info['confirmation_count']} إشارات
-📊 الصفقات المفتوحة: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}
-🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        # معالجة بيانات التأكيد
+        confirm_count = len(confirmation_data['unique_signals'])
+        secondary_signals = []
+        
+        # جمع الإشارات المساعدة (باستثناء الإشارة الرئيسية)
+        main_signal = trade_info['signal_type']
+        for signal in confirmation_data['unique_signals']:
+            if signal != main_signal:
+                secondary_signals.append(signal)
+        
+        secondary_count = len(secondary_signals)
+        
+        # بناء قائمة الإشارات المساعدة
+        secondary_listing = ""
+        for i, signal in enumerate(secondary_signals[:3], 1):
+            clean_signal = signal.replace('+', '').replace('-', '')
+            secondary_listing += f"┃   {i}. {clean_signal}\n"
+        
+        if secondary_count > 3:
+            secondary_listing += f"┃   ... و{secondary_count - 3} إشارات أخرى\n"
+        elif secondary_count == 0:
+            secondary_listing = "┃    - لا توجد إشارات مساعدة\n"
+        
+        open_trades = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
+        max_open_trades = self.config['MAX_OPEN_TRADES']
+        
+        # تنظيف اسم الإشارة الرئيسية
+        main_signal_clean = main_signal.replace('+', '').replace('-', '')
+        
+        message = f"""
+✦✦✦ 🚀 دخـــــول صفـــــقة ✦✦✦
+┏━━━━━━━━━━━━━━━━━━━━
+┃ 💰 الرمز: {ticker}
+┃ 🎯 نوع الصفقة: {direction_icon} {direction_text}
+┃ 📊 الاتجاه الحالي: {trend_icon} {trend_text}
+┃ 🎯 محاذاة الاتجاه: 🟢 مطابق للاتجاه العام
+┃ 📋 الإشارة الرئيسية: {main_signal_clean} (تم التأكيد بـ {confirm_count} إشارات)
+┃ 🔔 الإشارات المساعدة: {secondary_count} إشارة
+{secondary_listing}┃ 📊 الصفقات المفتوحة: {open_trades} من {max_open_trades}
+┗━━━━━━━━━━━━━━━━━━━━
+🕐 {datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')}
         """.strip()
+        
+        return message
     
     def format_exit_message(self, trade_info):
         """تنسيق رسالة خروج الصفقة"""
+        if trade_info['direction'] == 'CALL':
+            direction_icon, direction_text = "🟢", "شراء (CALL)"
+        else:
+            direction_icon, direction_text = "🔴", "بيع (PUT)"
+        
+        clean_exit_signal = trade_info['exit_signal'].replace('_', ' ')
+        open_trades = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
+        
         return f"""
-🚪 إغلاق صفقة
-💰 الرمز: {trade_info['ticker']}
-📝 السبب: {trade_info['exit_signal']}
-📊 الصفقات المفتوحة: {len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])}/{self.config['MAX_OPEN_TRADES']}
-🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+════ 🚪 إشـــــــارة خــــــروج ════
+┏━━━━━━━━━━━━━━━━━━━━
+┃ 💰 الرمز: {trade_info['ticker']}
+┃ 📝 السبب: إشارة خروج: {clean_exit_signal}
+┃ 🎯 نوع الصفقة المغلقة: {direction_icon} {direction_text}
+┃ 📊 الصفقات المفتوحة: {open_trades}/{self.config['MAX_OPEN_TRADES']}
+┗━━━━━━━━━━━━━━━━━━━━
+🕐 {datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')}
         """.strip()
     
     def format_confirmation_message(self, signal_data):
         """تنسيق رسالة تأكيد الاتجاه"""
+        if 'bullish' in signal_data['signal_type'].lower() or self.current_trend == 'BULLISH':
+            trend_icon, trend_text = "🟢📈", "شراء (اتجاه صاعد)"
+        elif 'bearish' in signal_data['signal_type'].lower() or self.current_trend == 'BEARISH':
+            trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
+        else:
+            trend_icon, trend_text = "⚪", "محايد"
+        
+        clean_signal = signal_data['signal_type'].replace('+', '').replace('-', '')
+        
         return f"""
-✅ تأكيد الاتجاه
-💰 الرمز: {signal_data['ticker']}
-📋 الإشارة: {signal_data['signal_type']}
-🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+✅ 📊 تأكيـــــد الاتجــــاه 📊 ✅
+┏━━━━━━━━━━━━━━━━━━━━
+┃ 💰 الرمز: {signal_data['ticker']}
+┃ 📈 الاتجاه المؤكد: {trend_icon} {trend_text}
+┃ 📋 الإشارة: {clean_signal}
+┃ ✅ الحالة: تأكيد مطابقة الاتجاه العام
+┗━━━━━━━━━━━━━━━━━━━━
+🕐 {datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')}
         """.strip()
     
     def format_general_message(self, signal_data):
         """تنسيق رسالة الإشارة العامة"""
+        clean_signal = signal_data['signal_type'].replace('+', '').replace('-', '')
+        
         return f"""
-🔔 إشارة جديدة
-💰 الرمز: {signal_data['ticker']}
-📋 الإشارة: {signal_data['signal_type']}
+☰☰☰ 🔔 إشارة جديدة ☰☰☰
+┏━━━━━━━━━━━━━━━━━━━━
+┃ 💰 الرمز: {signal_data['ticker']}
+┃ 📈 نوع الإشارة: {signal_data.get('category', 'عام')}
+┃ 📋 الإشارة: {clean_signal}
+┃ 📍 الحالة: مراقبة
+┗━━━━━━━━━━━━━━━━━━━━
 🕐 {signal_data['timestamp']}
         """.strip()
     
@@ -555,7 +629,7 @@ class TradingSystem:
                 <div class="container">
                     <h1>🧪 اختبار نظام إشارات التداول</h1>
                     <form method="POST">
-                        <textarea name="signal" placeholder="Ticker : BTCUSDT Signal : bullish_catcher Open : 110000 Close : 110100" required>Ticker : BTCUSDT Signal : bullish_catcher Open : 0 Close : 0</textarea>
+                        <textarea name="signal" placeholder="Ticker : BTCUSDT Signal : bullish_catcher Open : 0 Close : 0" required>Ticker : SPX500 Signal : Bearish New Imbalance Open : 0 Close : 0</textarea>
                         <br>
                         <button type="submit">إرسال الإشارة</button>
                     </form>
