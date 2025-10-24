@@ -67,9 +67,9 @@ class Config:
         # قوائم الإشارات - جميعها تقرأ من ملف .env
         self.TREND_SIGNALS = self._parse_signal_list(config('TREND_SIGNALS', default='bullish_catcher,bearish_catcher'))
         self.TREND_CONFIRM_SIGNALS = self._parse_signal_list(config('TREND_CONFIRM_SIGNALS', default='bullish_tracer,bearish_tracer,bullish_catcher_and_tracer,bearish_catcher_and_tracer'))
-        self.ENTRY_SIGNALS_BULLISH = self._parse_signal_list(config('ENTRY_SIGNALS_BULLISH', default='bullish_sbos_buy,bullish_schoch_buy,bullish_grab_buy,discount_exit_call,bullish_confirmation+,bullish_catcher_cross_over_tracer,bullish_moneyflow_co_50,bullish_hyperwave_co_50,bullish_switch_tracer,Strong bullish confluence,Bullish New Imbalance,Bullish Turn +,Bullish overflow,Bullish reversal,Weak bullish confluence,Bullish Block'))
-        self.ENTRY_SIGNALS_BEARISH = self._parse_signal_list(config('ENTRY_SIGNALS_BEARISH', default='bearish_moneyflow_cu_50,bearish_hyperwave_cu_50,bearish_switch_tracer,Within Bearish Imbalance,Bearish New Imbalance,Hyper Wave oscillator downward signal,Strong bearish confluence,Bearish overflow,Bearish Block'))
-        self.EXIT_SIGNALS = self._parse_signal_list(config('EXIT_SIGNALS', default='exit_buy,exit_sell,Bullish Imbalance Exited,Bearish Imbalance Exited,Bearish Imbalance Mitigated,Bullish Imbalance Mitigated'))
+        self.ENTRY_SIGNALS_BULLISH = self._parse_signal_list(config('ENTRY_SIGNALS_BULLISH', default='bullish_sbos_buy,bullish_schoch_buy,bullish_grab_buy,discount_exit_call,bullish_confirmation,bullish_catcher_cross_over_tracer,bullish_moneyflow_co_50,bullish_hyperwave_co_50,bullish_switch_tracer,Strong bullish confluence,Bullish New Imbalance,Bullish Turn,Bullish overflow,Bullish reversal,Weak bullish confluence,Bullish Block,Price broke up-trendline'))
+        self.ENTRY_SIGNALS_BEARISH = self._parse_signal_list(config('ENTRY_SIGNALS_BEARISH', default='bearish_moneyflow_cu_50,bearish_hyperwave_cu_50,bearish_switch_tracer,Within Bearish Imbalance,Bearish New Imbalance,Hyper Wave oscillator downward signal,Strong bearish confluence,Bearish overflow,Bearish Block,Bearish divergence,Overbought Hyper Wave oscillator downward signal'))
+        self.EXIT_SIGNALS = self._parse_signal_list(config('EXIT_SIGNALS', default='exit_buy,exit_sell,Bullish Imbalance Exited,Bearish Imbalance Exited,Bearish Imbalance Mitigated,Bullish Imbalance Mitigated,Bearish Imbalance Exited Block'))
         self.GENERAL_SIGNALS = self._parse_signal_list(config('GENERAL_SIGNALS', default='Within Bullish Imbalance,Within Bullish Block,Within Bearish Block,Hyper Wave oscillator upward signal'))
         self.ALL_SIGNALS = self._get_all_signals()
     
@@ -380,8 +380,16 @@ class ConfirmationManager:
             return {'status': 'ignored', 'reason': 'unknown_signal_type'}
     
     def _classify_signal(self, signal_data: Dict) -> str:
-        """تصنيف الإشارة"""
+        """تصنيف الإشارة مع تنظيف الإشارات المعقدة"""
         signal_type = signal_data['signal_type']
+        
+        # تنظيف الإشارة من المحتوى بين الأقواس والأرقام
+        cleaned_signal = self._clean_signal_type(signal_type)
+        
+        if cleaned_signal != signal_type:
+            print(f"🔧 تنظيف الإشارة: '{signal_type}' -> '{cleaned_signal}'")
+            signal_data['signal_type'] = cleaned_signal
+            signal_type = cleaned_signal
         
         if signal_type in self.config.TREND_SIGNALS:
             return 'TREND_SIGNALS'
@@ -414,6 +422,22 @@ class ConfirmationManager:
                     return 'EXIT_SIGNALS'
             
             return 'UNKNOWN'
+    
+    def _clean_signal_type(self, signal_type: str) -> str:
+        """تنظيف نوع الإشارة من المحتوى بين الأقواس والأرقام"""
+        import re
+        
+        # تنظيف الإشارة من المحتوى بين الأقواس
+        cleaned_signal = re.sub(r'\[.*?\]', '', signal_type)  # إزالة المحتوى بين []
+        cleaned_signal = re.sub(r'\(.*?\)', '', cleaned_signal)  # إزالة المحتوى بين ()
+        
+        # إزالة الأرقام والنقاط
+        cleaned_signal = re.sub(r'\d+\.?\d*', '', cleaned_signal)
+        
+        # إزالة الفراغات الزائدة
+        cleaned_signal = ' '.join(cleaned_signal.split())
+        
+        return cleaned_signal.strip()
     
     def _handle_trend_signal(self, signal_data: Dict) -> Dict:
         """معالجة إشارات الاتجاه"""
@@ -838,6 +862,19 @@ class SignalHandler:
                         signal_type = parts[1]
                         open_price = parts[2] if len(parts) > 2 else "0"
                         close_price = parts[3] if len(parts) > 3 else "0"
+                        
+                        # معالجة إشارات NaN
+                        if 'NaN' in signal_type:
+                            print(f"⚠️  إشارة تحتوي على NaN: {signal_type}")
+                            # محاولة استخراج اسم الإشارة الحقيقي
+                            if 'bullish_trend' in raw_signal:
+                                signal_type = 'bullish_trend'
+                            elif 'bearish_trend' in raw_signal:
+                                signal_type = 'bearish_trend'
+                            else:
+                                # إذا لم نستطع تحديد النوع، نتجاهل الإشارة
+                                return None
+                        
                         print(f"⚠️  تم تحويل الإشارة من الصيغة القديمة: {signal_type}")
                     else:
                         raise ValueError(f"صيغة الإشارة غير صالحة. التنسيق المتوقع: Ticker : SYMBOL Signal : SIGNAL Open : PRICE Close : PRICE")
@@ -850,6 +887,16 @@ class SignalHandler:
                     print(f"⚠️  تم معالجة الإشارة المختصرة: {signal_type}")
             else:
                 ticker, signal_type, open_price, close_price = match.groups()
+            
+            # تنظيف إشارة NaN النهائية
+            if 'NaN' in signal_type:
+                print(f"⚠️  إشارة تحتوي على NaN: {signal_type}")
+                if 'bullish' in raw_signal.lower():
+                    signal_type = 'bullish_trend'
+                elif 'bearish' in raw_signal.lower():
+                    signal_type = 'bearish_trend'
+                else:
+                    return None
             
             return {
                 'ticker': ticker.strip(),
