@@ -53,13 +53,24 @@ class Config:
         self.RESPECT_TREND_FOR_REGULAR_TRADES = config('RESPECT_TREND_FOR_REGULAR_TRADES', default=True, cast=bool)
         self.RESET_TRADES_ON_TREND_CHANGE = config('RESET_TRADES_ON_TREND_CHANGE', default=False, cast=bool)
         
+        # 🔔 إعدادات التحكم في إرسال الرسائل
+        self.SEND_TREND_MESSAGES = config('SEND_TREND_MESSAGES', default=True, cast=bool)
+        self.SEND_ENTRY_MESSAGES = config('SEND_ENTRY_MESSAGES', default=True, cast=bool)
+        self.SEND_EXIT_MESSAGES = config('SEND_EXIT_MESSAGES', default=True, cast=bool)
+        self.SEND_CONFIRMATION_MESSAGES = config('SEND_CONFIRMATION_MESSAGES', default=True, cast=bool)
+        self.SEND_GENERAL_MESSAGES = config('SEND_GENERAL_MESSAGES', default=True, cast=bool)
+        
+        # 🔔 التحكم في أنواع الإشارات
+        self.SEND_BULLISH_SIGNALS = config('SEND_BULLISH_SIGNALS', default=True, cast=bool)
+        self.SEND_BEARISH_SIGNALS = config('SEND_BEARISH_SIGNALS', default=True, cast=bool)
+        
         # قوائم الإشارات - جميعها تقرأ من ملف .env
         self.TREND_SIGNALS = self._parse_signal_list(config('TREND_SIGNALS', default='bullish_catcher,bearish_catcher'))
         self.TREND_CONFIRM_SIGNALS = self._parse_signal_list(config('TREND_CONFIRM_SIGNALS', default='bullish_tracer,bearish_tracer,bullish_catcher_and_tracer,bearish_catcher_and_tracer'))
-        self.ENTRY_SIGNALS_BULLISH = self._parse_signal_list(config('ENTRY_SIGNALS_BULLISH', default='bullish_sbos_buy,bullish_schoch_buy,bullish_grab_buy,discount_exit_call,bullish_confirmation+,bullish_catcher_cross_over_tracer,bullish_moneyflow_co_50,bullish_hyperwave_co_50,bullish_switch_tracer,Strong bullish confluence,Bullish New Imbalance,Bullish Turn +,Bullish overflow,Bullish reversal,Weak bullish confluence'))
-        self.ENTRY_SIGNALS_BEARISH = self._parse_signal_list(config('ENTRY_SIGNALS_BEARISH', default='bearish_moneyflow_cu_50,bearish_hyperwave_cu_50,bearish_switch_tracer,Within Bearish Imbalance,Bearish New Imbalance,Hyper Wave oscillator downward signal'))
-        self.EXIT_SIGNALS = self._parse_signal_list(config('EXIT_SIGNALS', default='exit_buy,exit_sell,Bullish Imbalance Exited,Bearish Imbalance Exited,Bearish Imbalance Mitigated,Bearish Imbalance Exited Block'))
-        self.GENERAL_SIGNALS = self._parse_signal_list(config('GENERAL_SIGNALS', default='Within Bullish Imbalance'))
+        self.ENTRY_SIGNALS_BULLISH = self._parse_signal_list(config('ENTRY_SIGNALS_BULLISH', default='bullish_sbos_buy,bullish_schoch_buy,bullish_grab_buy,discount_exit_call,bullish_confirmation+,bullish_catcher_cross_over_tracer,bullish_moneyflow_co_50,bullish_hyperwave_co_50,bullish_switch_tracer,Strong bullish confluence,Bullish New Imbalance,Bullish Turn +,Bullish overflow,Bullish reversal,Weak bullish confluence,Bullish Block'))
+        self.ENTRY_SIGNALS_BEARISH = self._parse_signal_list(config('ENTRY_SIGNALS_BEARISH', default='bearish_moneyflow_cu_50,bearish_hyperwave_cu_50,bearish_switch_tracer,Within Bearish Imbalance,Bearish New Imbalance,Hyper Wave oscillator downward signal,Strong bearish confluence,Bearish overflow,Bearish Block'))
+        self.EXIT_SIGNALS = self._parse_signal_list(config('EXIT_SIGNALS', default='exit_buy,exit_sell,Bullish Imbalance Exited,Bearish Imbalance Exited,Bearish Imbalance Mitigated,Bullish Imbalance Mitigated'))
+        self.GENERAL_SIGNALS = self._parse_signal_list(config('GENERAL_SIGNALS', default='Within Bullish Imbalance,Within Bullish Block,Within Bearish Block,Hyper Wave oscillator upward signal'))
         self.ALL_SIGNALS = self._get_all_signals()
     
     def _parse_signal_list(self, signal_str: str) -> list:
@@ -253,28 +264,61 @@ class MessageFormatter:
 
 # 📨 نظام الإشعارات المدمج
 class NotificationManager:
-    """مدير الإشعارات المدمج لـ Telegram والخادم الخارجي"""
+    """مدير الإشعارات المدمج مع تحكم كامل في الرسائل"""
     
     def __init__(self, config):
         self.config = config
         self.telegram_enabled = config.TELEGRAM_ENABLED
-        self.external_enabled = config.EXTERNAL_SERVER_ENABLED
         
-    def send_message(self, message: str, signal_data: Dict = None) -> bool:
-        """إرسال رسالة عبر جميع القنوات الممكنة"""
-        success = True
+    def should_send_message(self, message_type: str, signal_data: Dict = None) -> bool:
+        """التحقق مما إذا كان يجب إرسال الرسالة"""
+        if not self.telegram_enabled:
+            return False
         
-        # إرسال إلى Telegram
-        if self.telegram_enabled:
-            if not self._send_telegram(message):
-                success = False
+        # التحكم بناءً على نوع الرسالة
+        type_controls = {
+            'trend': self.config.SEND_TREND_MESSAGES,
+            'entry': self.config.SEND_ENTRY_MESSAGES,
+            'exit': self.config.SEND_EXIT_MESSAGES,
+            'confirmation': self.config.SEND_CONFIRMATION_MESSAGES,
+            'general': self.config.SEND_GENERAL_MESSAGES
+        }
         
-        # إرسال إلى الخادم الخارجي
-        if self.external_enabled and signal_data:
-            if not self._send_external(signal_data):
-                success = False
-                
-        return success
+        if message_type not in type_controls:
+            return True  # الإرسال افتراضيًا إذا لم يحدد النوع
+        
+        if not type_controls[message_type]:
+            print(f"🔇 إرسال {message_type} معطل عبر الإعدادات")
+            return False
+        
+        # التحكم في أنواع الإشارات (bullish/bearish)
+        if signal_data:
+            signal_type = signal_data.get('signal_type', '').lower()
+            direction = signal_data.get('direction', '')
+            
+            # إذا كانت إشارة شراء وbullish معطل
+            if ('bullish' in signal_type or direction == 'CALL') and not self.config.SEND_BULLISH_SIGNALS:
+                print(f"🔇 إرسال إشارات BULLISH معطل")
+                return False
+            
+            # إذا كانت إشارة بيع وbearish معطل  
+            if ('bearish' in signal_type or direction == 'PUT') and not self.config.SEND_BEARISH_SIGNALS:
+                print(f"🔇 إرسال إشارات BEARISH معطل")
+                return False
+        
+        return True
+    
+    def send_message(self, message: str, signal_data: Dict = None, message_type: str = 'general') -> bool:
+        """إرسال رسالة مع التحكم في النوع"""
+        
+        # التحقق مما إذا كان يجب إرسال الرسالة
+        if not self.should_send_message(message_type, signal_data):
+            # مع ذلك نطبع في اللوجز
+            print(f"📝 [غير مرسل] {message_type}: {message.split(chr(10))[0] if chr(10) in message else message}")
+            return True  # نعود بنجاح لأن التعطيل مقصود
+        
+        # إذا كان الإرسال مسموحًا، تابع الإرسال العادي
+        return self._send_telegram(message)
     
     def _send_telegram(self, message: str) -> bool:
         """إرسال إلى Telegram"""
@@ -303,40 +347,6 @@ class NotificationManager:
             
         except Exception as e:
             print(f"❌ خطأ في إرسال رسالة Telegram: {e}")
-            return False
-    
-    def _send_external(self, signal_data: Dict) -> bool:
-        """إرسال إلى الخادم الخارجي"""
-        try:
-            if self.config.EXTERNAL_SERVER_URL == 'https://api.example.com/webhook/trading':
-                print("⚠️  إعدادات الخادم الخارجي غير مكتملة - تم محاكاة الإرسال")
-                print(f"🌐 محاكاة إرسال إلى API: {json.dumps(signal_data, indent=2, ensure_ascii=False)}")
-                return True
-            
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {self.config.EXTERNAL_SERVER_TOKEN}',
-                'X-API-Key': self.config.EXTERNAL_SERVER_TOKEN
-            }
-            
-            response = requests.post(
-                self.config.EXTERNAL_SERVER_URL,
-                json=signal_data,
-                headers=headers,
-                timeout=10
-            )
-            
-            success = response.status_code in [200, 201]
-            
-            if success:
-                print("✅ تم إرسال البيانات إلى الخادم الخارجي بنجاح")
-            else:
-                print(f"❌ فشل إرسال إلى الخادم الخارجي: {response.status_code}")
-            
-            return success
-            
-        except Exception as e:
-            print(f"❌ خطأ في إرسال البيانات إلى الخادم الخارجي: {e}")
             return False
 
 # 🔍 مدير التأكيد المدمج
@@ -593,7 +603,7 @@ class TradeManager:
             if confirmation_result['status'] == 'confirmation_added':
                 current_trend = self.confirmation_manager.current_trend
                 message = self.message_formatter.format_trend_confirmation(signal_data, current_trend)
-                self.notification_manager.send_message(message, signal_data)
+                self.notification_manager.send_message(message, signal_data, 'confirmation')
             
             return confirmation_result
             
@@ -632,9 +642,9 @@ class TradeManager:
             
             self.active_trades[trade_id] = trade_info
             
-            # إرسال الإشعار
+            # إرسال الإشعار مع تحديد النوع
             message = self.message_formatter.format_trade_entry(trade_info, confirmation_result)
-            self.notification_manager.send_message(message, trade_info)
+            self.notification_manager.send_message(message, trade_info, 'entry')
             
             unique_signals = confirmation_result.get('unique_signals', [])
             print(f"📈 فتح صفقة {direction} للرمز {signal_data['ticker']} (#{trade_id}) بـ {len(unique_signals)} إشارات فريدة: {unique_signals}")
@@ -658,7 +668,7 @@ class TradeManager:
             # إرسال إشعار الاتجاه فقط إذا تغير الاتجاه أو لم يكن هناك إشعار سابق
             if trend_changed or self.last_trend_notification != current_trend:
                 message = self.message_formatter.format_trend_signal(signal_data)
-                self.notification_manager.send_message(message, signal_data)
+                self.notification_manager.send_message(message, signal_data, 'trend')
                 self.last_trend_notification = current_trend
                 print(f"📊 إرسال إشعار الاتجاه: {current_trend}")
             else:
@@ -725,7 +735,7 @@ class TradeManager:
             
             # إرسال إشعار الإغلاق
             message = self.message_formatter.format_trade_exit(trade_to_close)
-            self.notification_manager.send_message(message, trade_to_close)
+            self.notification_manager.send_message(message, trade_to_close, 'exit')
             
             self.active_trades.pop(trade_id, None)
             print(f"📉 إغلاق صفقة #{trade_id} بسبب: {reason}")
@@ -877,7 +887,7 @@ class SignalHandler:
         for category, signals in signal_categories.items():
             for signal in signals:
                 if signal.lower() in signal_type.lower() or signal_type.lower() in signal.lower():
-                    print(f"🎯 تمت مطابقة جزئية: {signal_type} -> {signal}")
+                    print(f"🎯 تمت مطابقة جزئية: {signal_type} -> {signal} في {category}")
                     return category, self._get_category_description(category)
         
         return 'UNKNOWN', 'إشارة غير معروفة'
@@ -931,7 +941,7 @@ class SignalHandler:
             # معالجة الإشارات العامة
             elif category == 'GENERAL_SIGNALS':
                 message = self.message_formatter.format_general_signal(signal_data)
-                self.notification_manager.send_message(message, signal_data)
+                self.notification_manager.send_message(message, signal_data, 'general')
                 print(f"📊 إشارة عامة: {signal_data['signal_type']}")
                 return True
             
@@ -943,7 +953,7 @@ class SignalHandler:
                 # إرسال إشعار عام للإشارات غير المرتبطة بالصفقات
                 if result['status'] in ['pending', 'trend_updated', 'general']:
                     message = self.message_formatter.format_general_signal(signal_data)
-                    self.notification_manager.send_message(message, signal_data)
+                    self.notification_manager.send_message(message, signal_data, 'general')
                 
                 return result['status'] != 'error'
             
@@ -966,7 +976,16 @@ class SignalHandler:
                 'TOTAL_SIGNALS': len(self.config.ALL_SIGNALS)
             },
             'telegram_enabled': self.config.TELEGRAM_ENABLED,
-            'external_server_enabled': self.config.EXTERNAL_SERVER_ENABLED
+            'external_server_enabled': self.config.EXTERNAL_SERVER_ENABLED,
+            'message_controls': {
+                'SEND_TREND_MESSAGES': self.config.SEND_TREND_MESSAGES,
+                'SEND_ENTRY_MESSAGES': self.config.SEND_ENTRY_MESSAGES,
+                'SEND_EXIT_MESSAGES': self.config.SEND_EXIT_MESSAGES,
+                'SEND_CONFIRMATION_MESSAGES': self.config.SEND_CONFIRMATION_MESSAGES,
+                'SEND_GENERAL_MESSAGES': self.config.SEND_GENERAL_MESSAGES,
+                'SEND_BULLISH_SIGNALS': self.config.SEND_BULLISH_SIGNALS,
+                'SEND_BEARISH_SIGNALS': self.config.SEND_BEARISH_SIGNALS
+            }
         }
 
 # 🌐 تطبيق Flask الرئيسي
@@ -1026,6 +1045,7 @@ def system_status():
             "active_trades": status['active_trades'],
             "confirmation_stats": status['confirmation_stats'],
             "signal_categories": status['signal_categories_loaded'],
+            "message_controls": status['message_controls'],
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     else:
