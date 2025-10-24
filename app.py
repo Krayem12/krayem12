@@ -349,6 +349,7 @@ class ConfirmationManager:
         self.confirmed_signals = {}
         self.current_trend = None
         self.trend_signals = []
+        self.last_trend_notification = None  # لتتبع آخر إشعار اتجاه تم إرساله
         
     def add_signal(self, signal_data: Dict) -> Dict:
         """إضافة إشارة جديدة"""
@@ -407,11 +408,16 @@ class ConfirmationManager:
     def _handle_trend_signal(self, signal_data: Dict) -> Dict:
         """معالجة إشارات الاتجاه"""
         signal_type = signal_data['signal_type']
+        new_trend = None
         
         if 'bullish' in signal_type.lower():
-            self.current_trend = 'BULLISH'
+            new_trend = 'BULLISH'
         elif 'bearish' in signal_type.lower():
-            self.current_trend = 'BEARISH'
+            new_trend = 'BEARISH'
+        
+        # التحقق إذا كان الاتجاه قد تغير
+        trend_changed = self.current_trend != new_trend
+        self.current_trend = new_trend
         
         self.trend_signals.append({
             **signal_data,
@@ -419,7 +425,12 @@ class ConfirmationManager:
         })
         
         self._clean_old_trend_signals()
-        return {'status': 'trend_updated', 'current_trend': self.current_trend}
+        
+        return {
+            'status': 'trend_updated', 
+            'current_trend': self.current_trend,
+            'trend_changed': trend_changed
+        }
     
     def _handle_entry_signal(self, signal_data: Dict, category: str) -> Dict:
         """معالجة إشارات الدخول - تتطلب إشارتين مختلفتين"""
@@ -541,6 +552,7 @@ class TradeManager:
         self.message_formatter = message_formatter
         self.confirmation_manager = ConfirmationManager(config)
         self.active_trades = {}
+        self.last_trend_notification = None  # لتتبع آخر إشعار اتجاه تم إرساله
     
     def process_signal(self, signal_data: Dict) -> Dict:
         """معالجة الإشارة"""
@@ -550,7 +562,7 @@ class TradeManager:
             if confirmation_result['status'] == 'confirmed':
                 return self._open_confirmed_trade(signal_data, confirmation_result)
             elif confirmation_result['status'] == 'trend_updated':
-                return self._handle_trend_change(confirmation_result)
+                return self._handle_trend_change(confirmation_result, signal_data)
             elif confirmation_result['status'] == 'general_signal':
                 return {'status': 'general', 'message': 'إشارة عامة - للمراقبة فقط'}
             else:
@@ -637,10 +649,22 @@ class TradeManager:
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
     
-    def _handle_trend_change(self, trend_result: Dict) -> Dict:
-        """معالجة تغيير الاتجاه"""
+    def _handle_trend_change(self, trend_result: Dict, signal_data: Dict) -> Dict:
+        """معالجة تغيير الاتجاه مع التحكم في الإشعارات"""
         try:
-            if self.config.RESET_TRADES_ON_TREND_CHANGE and self.active_trades:
+            current_trend = trend_result['current_trend']
+            trend_changed = trend_result.get('trend_changed', False)
+            
+            # إرسال إشعار الاتجاه فقط إذا تغير الاتجاه أو لم يكن هناك إشعار سابق
+            if trend_changed or self.last_trend_notification != current_trend:
+                message = self.message_formatter.format_trend_signal(signal_data)
+                self.notification_manager.send_message(message, signal_data)
+                self.last_trend_notification = current_trend
+                print(f"📊 إرسال إشعار الاتجاه: {current_trend}")
+            else:
+                print(f"⏭️  تجاهل إرسال إشعار الاتجاه لنفس الاتجاه: {current_trend}")
+            
+            if self.config.RESET_TRADES_ON_TREND_CHANGE and self.active_trades and trend_changed:
                 closed_trades = []
                 for trade_id in list(self.active_trades.keys()):
                     closed_trade = self._close_trade_by_id(trade_id, 'trend_change')
@@ -649,14 +673,15 @@ class TradeManager:
                 
                 return {
                     'status': 'trend_changed',
-                    'message': f"تم تغيير الاتجاه إلى {trend_result['current_trend']} وإغلاق {len(closed_trades)} صفقة",
+                    'message': f"تم تغيير الاتجاه إلى {current_trend} وإغلاق {len(closed_trades)} صفقة",
                     'closed_trades': closed_trades
                 }
             else:
                 return {
                     'status': 'trend_updated',
-                    'message': f"تم تحديث الاتجاه إلى {trend_result['current_trend']}",
-                    'current_trend': trend_result['current_trend']
+                    'message': f"تم تحديث الاتجاه إلى {current_trend}",
+                    'current_trend': current_trend,
+                    'notification_sent': trend_changed or self.last_trend_notification != current_trend
                 }
                 
         except Exception as e:
@@ -744,7 +769,8 @@ class TradeManager:
             'confirmed_signals': len(self.confirmation_manager.confirmed_signals),
             'active_trades': self.get_active_trades_count(),
             'max_trades': self.config.MAX_OPEN_TRADES,
-            'current_trend': self.confirmation_manager.current_trend
+            'current_trend': self.confirmation_manager.current_trend,
+            'last_trend_notification': self.last_trend_notification
         }
 
 # 🎯 معالج الإشارات المدمج
@@ -766,7 +792,7 @@ class SignalHandler:
         print(f"   ✦✦✦ دخول الصفقة")
         print(f"   ✅ 📊 تأكيد الاتجاه")  
         print(f"   ════ إشارة الخروج")
-        print(f"   ☰☰☰ الاتجاه العام")
+        print(f"   ☰☰☰ الاتجاه العام (مرة واحدة فقط)")
         print(f"   🔔 إشارة عامة")
     
     def _display_loaded_signals(self):
@@ -885,8 +911,7 @@ class SignalHandler:
             
             # معالجة خاصة لإشارات الاتجاه
             if category == 'TREND_SIGNALS':
-                message = self.message_formatter.format_trend_signal(signal_data)
-                self.notification_manager.send_message(message, signal_data)
+                # لا نرسل رسالة الاتجاه هنا - سيتم إرسالها في TradeManager إذا تغير الاتجاه
                 result = self.trade_manager.process_signal(signal_data)
                 print(f"📊 نتيجة معالجة الاتجاه: {result['status']} - {result.get('message', '')}")
                 return True
