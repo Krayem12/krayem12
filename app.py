@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-نظام معالجة إشارات التداول - النسخة المختصرة
-يحافظ على الوظائف الأساسية مع تقليل التعقيد
+نظام معالجة إشارات التداول - النسخة المعدلة للتشغيل على Render
 """
 
 import os
@@ -35,7 +34,7 @@ class TradingSystem:
         """إعداد التكوين الأساسي"""
         self.config = {
             # الإعدادات الأساسية
-            'DEBUG': config('DEBUG', default=True, cast=bool),
+            'DEBUG': config('DEBUG', default=False, cast=bool),
             'PORT': config('PORT', default=10000, cast=int),
             
             # إعدادات Telegram
@@ -101,7 +100,7 @@ class TradingSystem:
         def home():
             return jsonify({
                 "status": "active",
-                "service": "Trading Signal Processor - Compact",
+                "service": "Trading Signal Processor",
                 "version": "4.0.0",
                 "port": self.port
             })
@@ -167,9 +166,7 @@ class TradingSystem:
         if isinstance(data, dict):
             ticker = data.get('ticker', data.get('symbol', 'UNKNOWN'))
             signal_type = data.get('signal', data.get('action', 'UNKNOWN'))
-            open_price = str(data.get('open', '0'))
-            close_price = str(data.get('close', '0'))
-            return f"Ticker : {ticker} Signal : {signal_type} Open : {open_price} Close : {close_price}"
+            return f"Ticker : {ticker} Signal : {signal_type} Open : 0 Close : 0"
         return str(data)
     
     def process_signal(self, raw_signal):
@@ -211,8 +208,7 @@ class TradingSystem:
                     parts = [p.strip() for p in raw_signal.split('|')]
                     if len(parts) >= 2:
                         ticker, signal_type = parts[0], parts[1]
-                        open_price = parts[2] if len(parts) > 2 else "0"
-                        close_price = parts[3] if len(parts) > 3 else "0"
+                        open_price, close_price = "0", "0"
                     else:
                         return None
                 else:
@@ -229,8 +225,6 @@ class TradingSystem:
             return {
                 'ticker': ticker.strip(),
                 'signal_type': signal_type.strip(),
-                'open_price': open_price.strip(),
-                'close_price': close_price.strip(),
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'source': 'TradingView'
             }
@@ -339,7 +333,6 @@ class TradingSystem:
         """فتح صفقة مؤكدة"""
         pending_data = self.pending_signals[signal_key]
         main_signal = pending_data['signals_data'][0]
-        secondary_signals = pending_data['signals_data'][1:]
         
         trade_id = str(uuid.uuid4())[:8]
         direction = 'CALL' if signal_category == 'entry_bullish' else 'PUT'
@@ -351,8 +344,7 @@ class TradingSystem:
             'signal_type': main_signal['signal_type'],
             'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'status': 'OPEN',
-            'confirmation_count': len(pending_data['unique_signals']),
-            'secondary_signals': [s['signal_type'] for s in secondary_signals]
+            'confirmation_count': len(pending_data['unique_signals'])
         }
         
         self.active_trades[trade_id] = trade_info
@@ -426,8 +418,8 @@ class TradingSystem:
             'trend': self.config['SEND_TREND_MESSAGES'],
             'entry': self.config['SEND_ENTRY_MESSAGES'],
             'exit': self.config['SEND_EXIT_MESSAGES'],
-            'confirmation': True,  # دائماً نرسل تأكيد الاتجاه
-            'general': True        # دائماً نرسل الإشارات العامة
+            'confirmation': True,
+            'general': True
         }
         
         if message_type not in type_controls or not type_controls[message_type]:
@@ -460,15 +452,7 @@ class TradingSystem:
                 'parse_mode': 'HTML'
             }
             response = requests.post(url, json=payload, timeout=10)
-            success = response.status_code == 200
-            
-            if success:
-                self.logger.info("✅ تم إرسال الرسالة إلى Telegram")
-            else:
-                self.logger.error(f"❌ فشل إرسال Telegram: {response.status_code}")
-            
-            return success
-            
+            return response.status_code == 200
         except Exception as e:
             self.logger.error(f"❌ خطأ في إرسال Telegram: {e}")
             return False
@@ -477,13 +461,10 @@ class TradingSystem:
     def format_trend_message(self, signal_data, trend_icon, trend_text):
         """تنسيق رسالة الاتجاه"""
         return f"""
-☰☰☰ 📊 الاتجاه العام ☰☰☰
-┏━━━━━━━━━━━━━━━━━━━━
-┃ 💰 الرمز: {signal_data['ticker']}
-┃ 📈 الاتجاه: {trend_icon} {trend_text}
-┃ 📋 الإشارة: {signal_data['signal_type']}
-┃ 🔄 الحالة: الاتجاه العام محدث
-┗━━━━━━━━━━━━━━━━━━━━
+📊 الاتجاه العام
+💰 الرمز: {signal_data['ticker']}
+📈 الاتجاه: {trend_icon} {trend_text}
+📋 الإشارة: {signal_data['signal_type']}
 🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """.strip()
     
@@ -491,90 +472,43 @@ class TradingSystem:
         """تنسيق رسالة دخول الصفقة"""
         if trade_info['direction'] == 'CALL':
             direction_icon, direction_text = "🟢", "شراء"
-            trend_icon, trend_text = "🟢📈", "شراء (اتجاه صاعد)"
         else:
             direction_icon, direction_text = "🔴", "بيع"
-            trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
-        
-        confirm_count = confirmation_data['unique_signals']
-        secondary_count = len(trade_info['secondary_signals'])
-        
-        secondary_listing = ""
-        for i, signal in enumerate(trade_info['secondary_signals'][:3], 1):
-            clean_signal = signal.replace('+', '').replace('-', '')
-            secondary_listing += f"┃   {i}. {clean_signal}\n"
-        
-        if secondary_count > 3:
-            secondary_listing += f"┃   ... و{secondary_count - 3} إشارات أخرى\n"
         
         return f"""
-✦✦✦ 🚀 دخـــــول صفـــــقة ✦✦✦
-┏━━━━━━━━━━━━━━━━━━━━
-┃ 💰 الرمز: {trade_info['ticker']}
-┃ 🎯 نوع الصفقة: {direction_icon} {direction_text}
-┃ 📊 الاتجاه الحالي: {trend_icon} {trend_text}
-┃ 🎯 محاذاة الاتجاه: 🟢 مطابق للاتجاه العام
-┃ 📋 الإشارة الرئيسية: {trade_info['signal_type']} (تم التأكيد بـ {len(confirm_count)} إشارات)
-┃ 🔔 الإشارات المساعدة: {secondary_count} إشارة
-{secondary_listing}┃ 📊 الصفقات المفتوحة: {len(self.active_trades)} من {self.config['MAX_OPEN_TRADES']}
-┗━━━━━━━━━━━━━━━━━━━━
-🕐 {datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')}
+🚀 دخول صفقة
+💰 الرمز: {trade_info['ticker']}
+🎯 النوع: {direction_icon} {direction_text}
+✅ تم التأكيد بـ {trade_info['confirmation_count']} إشارات
+📊 الصفقات المفتوحة: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}
+🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """.strip()
     
     def format_exit_message(self, trade_info):
         """تنسيق رسالة خروج الصفقة"""
-        if trade_info['direction'] == 'CALL':
-            direction_icon, direction_text = "🟢", "شراء (CALL)"
-        else:
-            direction_icon, direction_text = "🔴", "بيع (PUT)"
-        
-        clean_exit_signal = trade_info['exit_signal'].replace('_', ' ')
-        
         return f"""
-════ 🚪 إشـــــــارة خــــــروج ════
-┏━━━━━━━━━━━━━━━━━━━━
-┃ 💰 الرمز: {trade_info['ticker']}
-┃ 📝 السبب: إشارة خروج: {clean_exit_signal}
-┃ 🎯 نوع الصفقة المغلقة: {direction_icon} {direction_text}
-┃ 📊 الصفقات المفتوحة: {len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])}/{self.config['MAX_OPEN_TRADES']}
-┗━━━━━━━━━━━━━━━━━━━━
-🕐 {datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')}
+🚪 إغلاق صفقة
+💰 الرمز: {trade_info['ticker']}
+📝 السبب: {trade_info['exit_signal']}
+📊 الصفقات المفتوحة: {len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])}/{self.config['MAX_OPEN_TRADES']}
+🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """.strip()
     
     def format_confirmation_message(self, signal_data):
         """تنسيق رسالة تأكيد الاتجاه"""
-        if 'bullish' in signal_data['signal_type'].lower() or self.current_trend == 'BULLISH':
-            trend_icon, trend_text = "🟢📈", "شراء (اتجاه صاعد)"
-        elif 'bearish' in signal_data['signal_type'].lower() or self.current_trend == 'BEARISH':
-            trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
-        else:
-            trend_icon, trend_text = "⚪", "محايد"
-        
-        clean_signal = signal_data['signal_type'].replace('+', '').replace('-', '')
-        
         return f"""
-✅ 📊 تأكيـــــد الاتجــــاه 📊 ✅
-┏━━━━━━━━━━━━━━━━━━━━
-┃ 💰 الرمز: {signal_data['ticker']}
-┃ 📈 الاتجاه المؤكد: {trend_icon} {trend_text}
-┃ 📋 الإشارة: {clean_signal}
-┃ ✅ الحالة: تأكيد مطابقة الاتجاه العام
-┗━━━━━━━━━━━━━━━━━━━━
-🕐 {datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')}
+✅ تأكيد الاتجاه
+💰 الرمز: {signal_data['ticker']}
+📋 الإشارة: {signal_data['signal_type']}
+🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """.strip()
     
     def format_general_message(self, signal_data):
         """تنسيق رسالة الإشارة العامة"""
-        clean_signal = signal_data['signal_type'].replace('+', '').replace('-', '')
-        
         return f"""
-☰☰☰ 🔔 إشارة جديدة ☰☰☰
-┏━━━━━━━━━━━━━━━━━━━━
-┃ 💰 الرمز: {signal_data['ticker']}
-┃ 📈 نوع الإشارة: {signal_data.get('category', 'عام')}
-┃ 📋 الإشارة: {clean_signal}
-┃ 📍 الحالة: مراقبة
-┗━━━━━━━━━━━━━━━━━━━━
+🔔 إشارة جديدة
+💰 الرمز: {signal_data['ticker']}
+📋 الإشارة: {signal_data['signal_type']}
 🕐 {signal_data['timestamp']}
         """.strip()
     
@@ -589,13 +523,12 @@ class TradingSystem:
             "pending_signals": len(self.pending_signals),
             "current_trend": self.current_trend,
             "required_confirmations": self.config['REQUIRED_CONFIRMATIONS'],
-            "telegram_enabled": self.config['TELEGRAM_ENABLED'],
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
     
     def display_loaded_signals(self):
         """عرض الإشارات المحملة"""
-        print("📋 الإشارات المحملة من ملف .env:")
+        print("📋 الإشارات المحملة:")
         total_signals = 0
         for category, signals in self.signals.items():
             print(f"   {category}: {len(signals)} إشارة")
@@ -605,7 +538,31 @@ class TradingSystem:
     def handle_test(self, request):
         """معالجة صفحة الاختبار"""
         if request.method == 'GET':
-            return self.get_test_page()
+            return '''
+            <!DOCTYPE html>
+            <html dir="rtl">
+            <head>
+                <title>اختبار نظام إشارات التداول</title>
+                <meta charset="utf-8">
+                <style>
+                    body { font-family: Arial; margin: 40px; background: #f5f5f5; }
+                    .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+                    textarea { width: 100%; height: 100px; margin: 10px 0; padding: 10px; }
+                    button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🧪 اختبار نظام إشارات التداول</h1>
+                    <form method="POST">
+                        <textarea name="signal" placeholder="Ticker : BTCUSDT Signal : bullish_catcher Open : 110000 Close : 110100" required>Ticker : BTCUSDT Signal : bullish_catcher Open : 0 Close : 0</textarea>
+                        <br>
+                        <button type="submit">إرسال الإشارة</button>
+                    </form>
+                </div>
+            </body>
+            </html>
+            '''
         else:
             signal = request.form.get('signal', '')
             success = self.process_signal(signal)
@@ -615,7 +572,6 @@ class TradingSystem:
                 <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 5px;">
                     <h3>✅ تمت المعالجة بنجاح!</h3>
                     <p><strong>الإشارة:</strong> {signal}</p>
-                    <p><strong>الوقت:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
                 </div>
                 <a href="/test">⟲ اختبار إشارة أخرى</a>
                 '''
@@ -628,40 +584,14 @@ class TradingSystem:
                 <a href="/test">⟲ محاولة مرة أخرى</a>
                 '''
     
-    def get_test_page(self):
-        """صفحة اختبار Webhook"""
-        return '''
-        <!DOCTYPE html>
-        <html dir="rtl">
-        <head>
-            <title>اختبار نظام إشارات التداول</title>
-            <meta charset="utf-8">
-            <style>
-                body { font-family: Arial; margin: 40px; background: #f5f5f5; }
-                .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
-                textarea { width: 100%; height: 100px; margin: 10px 0; padding: 10px; }
-                button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>🧪 اختبار نظام إشارات التداول</h1>
-                <form method="POST">
-                    <textarea name="signal" placeholder="Ticker : BTCUSDT Signal : bullish_catcher Open : 110000 Close : 110100" required>Ticker : BTCUSDT Signal : bullish_catcher Open : 110000 Close : 110100</textarea>
-                    <br>
-                    <button type="submit">إرسال الإشارة</button>
-                </form>
-            </div>
-        </body>
-        </html>
-        '''
-    
     def run(self):
         """تشغيل التطبيق"""
         self.logger.info(f"🌐 بدء التشغيل على المنفذ {self.port}")
         self.app.run(host='0.0.0.0', port=self.port, debug=self.config['DEBUG'])
 
-# التشغيل الرئيسي
+# الحل: إنشاء النظام وتعيين app لكائن Flask
+system = TradingSystem()
+app = system.app
+
 if __name__ == '__main__':
-    system = TradingSystem()
     system.run()
