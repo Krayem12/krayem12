@@ -56,9 +56,9 @@ class Config:
         # قوائم الإشارات - جميعها تقرأ من ملف .env
         self.TREND_SIGNALS = self._parse_signal_list(config('TREND_SIGNALS', default='bullish_catcher,bearish_catcher'))
         self.TREND_CONFIRM_SIGNALS = self._parse_signal_list(config('TREND_CONFIRM_SIGNALS', default='bullish_tracer,bearish_tracer,bullish_catcher_and_tracer,bearish_catcher_and_tracer'))
-        self.ENTRY_SIGNALS_BULLISH = self._parse_signal_list(config('ENTRY_SIGNALS_BULLISH', default='bullish_sbos_buy,bullish_schoch_buy,bullish_grab_buy,discount_exit_call,bullish_confirmation+,bullish_catcher_cross_over_tracer,bullish_moneyflow_co_50,bullish_hyperwave_co_50,bullish_switch_tracer,Strong bullish confluence,Bullish New Imbalance,Bullish Turn +,Bullish overflow'))
+        self.ENTRY_SIGNALS_BULLISH = self._parse_signal_list(config('ENTRY_SIGNALS_BULLISH', default='bullish_sbos_buy,bullish_schoch_buy,bullish_grab_buy,discount_exit_call,bullish_confirmation+,bullish_catcher_cross_over_tracer,bullish_moneyflow_co_50,bullish_hyperwave_co_50,bullish_switch_tracer,Strong bullish confluence,Bullish New Imbalance,Bullish Turn +,Bullish overflow,Bullish reversal,Weak bullish confluence'))
         self.ENTRY_SIGNALS_BEARISH = self._parse_signal_list(config('ENTRY_SIGNALS_BEARISH', default='bearish_moneyflow_cu_50,bearish_hyperwave_cu_50,bearish_switch_tracer,Within Bearish Imbalance,Bearish New Imbalance,Hyper Wave oscillator downward signal'))
-        self.EXIT_SIGNALS = self._parse_signal_list(config('EXIT_SIGNALS', default='exit_buy,exit_sell,Bullish Imbalance Exited,Bearish Imbalance Exited,Bearish Imbalance Mitigated'))
+        self.EXIT_SIGNALS = self._parse_signal_list(config('EXIT_SIGNALS', default='exit_buy,exit_sell,Bullish Imbalance Exited,Bearish Imbalance Exited,Bearish Imbalance Mitigated,Bearish Imbalance Exited Block'))
         self.GENERAL_SIGNALS = self._parse_signal_list(config('GENERAL_SIGNALS', default='Within Bullish Imbalance'))
         self.ALL_SIGNALS = self._get_all_signals()
     
@@ -341,7 +341,7 @@ class NotificationManager:
 
 # 🔍 مدير التأكيد المدمج
 class ConfirmationManager:
-    """مدير تأكيد الإشارات المدمج"""
+    """مدير تأكيد الإشارات المدمج - يتطلب إشارتين مختلفتين من نفس النوع"""
     
     def __init__(self, config):
         self.config = config
@@ -354,14 +354,13 @@ class ConfirmationManager:
         """إضافة إشارة جديدة"""
         signal_type = signal_data['signal_type']
         ticker = signal_data['ticker']
-        signal_key = f"{ticker}_{signal_type}"
         
         category = self._classify_signal(signal_data)
         
         if category == 'TREND_SIGNALS':
             return self._handle_trend_signal(signal_data)
         elif category in ['ENTRY_SIGNALS_BULLISH', 'ENTRY_SIGNALS_BEARISH']:
-            return self._handle_entry_signal(signal_data, signal_key)
+            return self._handle_entry_signal(signal_data, category)
         elif category == 'TREND_CONFIRM_SIGNALS':
             return self._handle_confirmation_signal(signal_data)
         elif category == 'GENERAL_SIGNALS':
@@ -422,22 +421,35 @@ class ConfirmationManager:
         self._clean_old_trend_signals()
         return {'status': 'trend_updated', 'current_trend': self.current_trend}
     
-    def _handle_entry_signal(self, signal_data: Dict, signal_key: str) -> Dict:
-        """معالجة إشارات الدخول"""
+    def _handle_entry_signal(self, signal_data: Dict, category: str) -> Dict:
+        """معالجة إشارات الدخول - تتطلب إشارتين مختلفتين"""
         current_time = datetime.now()
+        ticker = signal_data['ticker']
+        signal_type = signal_data['signal_type']
         
         self._clean_expired_signals()
         
+        # مفتاح فريد لكل زوج من الرمز والنوع
+        signal_key = f"{ticker}_{category}"
+        
         if signal_key not in self.pending_signals:
             self.pending_signals[signal_key] = {
-                'main_signal': signal_data,
-                'confirmations': [],
-                'secondary_signals': [],
+                'ticker': ticker,
+                'category': category,
+                'unique_signals': set(),  # استخدام set لتخزين الإشارات الفريدة
+                'signals_data': [],       # تخزين بيانات الإشارات
                 'created_at': current_time,
                 'updated_at': current_time
             }
-        else:
+        
+        # إضافة الإشارة إذا كانت مختلفة
+        if signal_type not in self.pending_signals[signal_key]['unique_signals']:
+            self.pending_signals[signal_key]['unique_signals'].add(signal_type)
+            self.pending_signals[signal_key]['signals_data'].append(signal_data)
             self.pending_signals[signal_key]['updated_at'] = current_time
+            print(f"📥 إضافة إشارة فريدة: {signal_type} للمفتاح {signal_key}")
+        else:
+            print(f"⏭️  تجاهل إشارة مكررة: {signal_type} للمفتاح {signal_key}")
         
         return self._check_confirmation(signal_key)
     
@@ -448,35 +460,54 @@ class ConfirmationManager:
         
         for signal_key in list(self.pending_signals.keys()):
             if ticker in signal_key:
-                self.pending_signals[signal_key]['secondary_signals'].append(signal_data)
-                self.pending_signals[signal_key]['updated_at'] = datetime.now()
-                
-                result = self._check_confirmation(signal_key)
-                if result['status'] == 'confirmed':
-                    confirmed_any = True
+                # إضافة إشارات التأكيد كإشارات ثانوية
+                signal_type = signal_data['signal_type']
+                if signal_type not in self.pending_signals[signal_key]['unique_signals']:
+                    self.pending_signals[signal_key]['unique_signals'].add(signal_type)
+                    self.pending_signals[signal_key]['signals_data'].append(signal_data)
+                    self.pending_signals[signal_key]['updated_at'] = datetime.now()
+                    
+                    result = self._check_confirmation(signal_key)
+                    if result['status'] == 'confirmed':
+                        confirmed_any = True
         
         return {'status': 'confirmation_added', 'confirmed': confirmed_any}
     
     def _check_confirmation(self, signal_key: str) -> Dict:
-        """التحقق من اكتمال التأكيدات"""
+        """التحقق من اكتمال التأكيدات - يتطلب إشارتين مختلفتين على الأقل"""
         signal_data = self.pending_signals[signal_key]
-        confirmations_count = len(signal_data['confirmations'])
-        secondary_count = len(signal_data['secondary_signals'])
-        total_signals = 1 + confirmations_count + secondary_count
+        unique_signals_count = len(signal_data['unique_signals'])
         
-        if total_signals >= self.config.REQUIRED_CONFIRMATIONS:
-            self.confirmed_signals[signal_key] = signal_data
+        print(f"🔍 التحقق من التأكيد للمفتاح {signal_key}: {unique_signals_count} إشارة فريدة")
+        
+        if unique_signals_count >= self.config.REQUIRED_CONFIRMATIONS:
+            # تأكيد الصفقة
+            confirmed_data = {
+                'main_signal': signal_data['signals_data'][0],  # أول إشارة
+                'secondary_signals': signal_data['signals_data'][1:],  # باقي الإشارات
+                'unique_signals': list(signal_data['unique_signals']),
+                'total_signals': unique_signals_count
+            }
+            
+            self.confirmed_signals[signal_key] = confirmed_data
             del self.pending_signals[signal_key]
+            
+            print(f"✅ تأكيد صفقة بـ {unique_signals_count} إشارات فريدة: {confirmed_data['unique_signals']}")
             
             return {
                 'status': 'confirmed',
-                'main_signal': signal_data['main_signal'],
-                'confirmations': signal_data['confirmations'],
-                'secondary_signals': signal_data['secondary_signals'],
-                'total_signals': total_signals
+                'unique_signals': confirmed_data['unique_signals'],
+                'total_signals': unique_signals_count,
+                'main_signal': confirmed_data['main_signal'],
+                'secondary_signals': confirmed_data['secondary_signals']
             }
         
-        return {'status': 'pending', 'current_count': total_signals, 'required': self.config.REQUIRED_CONFIRMATIONS}
+        return {
+            'status': 'pending', 
+            'current_count': unique_signals_count, 
+            'required': self.config.REQUIRED_CONFIRMATIONS,
+            'unique_signals': list(signal_data['unique_signals'])
+        }
     
     def _clean_expired_signals(self):
         """تنظيف الإشارات المنتهية"""
@@ -487,6 +518,7 @@ class ConfirmationManager:
             time_diff = (current_time - signal_data['created_at']).total_seconds()
             if time_diff > self.config.CONFIRMATION_TIMEOUT:
                 expired_keys.append(signal_key)
+                print(f"🗑️  تنظيف إشارات منتهية: {signal_key}")
         
         for key in expired_keys:
             del self.pending_signals[key]
@@ -522,11 +554,19 @@ class TradeManager:
             elif confirmation_result['status'] == 'general_signal':
                 return {'status': 'general', 'message': 'إشارة عامة - للمراقبة فقط'}
             else:
-                return {
-                    'status': 'pending',
-                    'message': f"في انتظار التأكيدات ({confirmation_result.get('current_count', 1)}/{confirmation_result.get('required', 2)})",
-                    'signal': signal_data
-                }
+                unique_signals = confirmation_result.get('unique_signals', [])
+                if unique_signals:
+                    return {
+                        'status': 'pending',
+                        'message': f"في انتظار تأكيدات إضافية ({confirmation_result.get('current_count', 1)}/{confirmation_result.get('required', 2)}) - الإشارات: {', '.join(unique_signals)}",
+                        'signal': signal_data
+                    }
+                else:
+                    return {
+                        'status': 'pending',
+                        'message': f"في انتظار تأكيدات إضافية ({confirmation_result.get('current_count', 1)}/{confirmation_result.get('required', 2)})",
+                        'signal': signal_data
+                    }
                 
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
@@ -574,7 +614,8 @@ class TradeManager:
                 'source': 'TradingView',
                 'open_trades': len(self.active_trades) + 1,
                 'max_open_trades': self.config.MAX_OPEN_TRADES,
-                'confirmation_data': confirmation_result
+                'confirmation_data': confirmation_result,
+                'unique_confirmation_signals': confirmation_result.get('unique_signals', [])
             }
             
             self.active_trades[trade_id] = trade_info
@@ -583,7 +624,8 @@ class TradeManager:
             message = self.message_formatter.format_trade_entry(trade_info, confirmation_result)
             self.notification_manager.send_message(message, trade_info)
             
-            print(f"📈 فتح صفقة {direction} للرمز {signal_data['ticker']} (#{trade_id})")
+            unique_signals = confirmation_result.get('unique_signals', [])
+            print(f"📈 فتح صفقة {direction} للرمز {signal_data['ticker']} (#{trade_id}) بـ {len(unique_signals)} إشارات فريدة: {unique_signals}")
             
             return {
                 'status': 'opened',
@@ -718,7 +760,7 @@ class SignalHandler:
         # عرض الإشارات المحملة من .env
         self._display_loaded_signals()
         
-        print(f"🔧 نظام التأكيد مفعل - مطلوب {self.config.REQUIRED_CONFIRMATIONS} إشارات للتأكيد")
+        print(f"🔧 نظام التأكيد مفعل - مطلوب {self.config.REQUIRED_CONFIRMATIONS} إشارات مختلفة للتأكيد")
         print(f"📊 الحد الأقصى للصفقات: {self.config.MAX_OPEN_TRADES}")
         print(f"📨 نماذج الرسائل المدعومة:")
         print(f"   ✦✦✦ دخول الصفقة")
