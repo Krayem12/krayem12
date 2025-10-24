@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-نظام معالجة إشارات التداول - النسخة المعدلة مع تحميل كامل للإعدادات من .env
+نظام معالجة إشارات التداول - النسخة المعدلة مع منع الإشارات المكررة
 """
 
 import os
@@ -27,7 +27,7 @@ class TradingSystem:
         self.display_loaded_signals()
         
         print(f"🚀 نظام معالجة الإشارات جاهز - المنفذ {self.port}")
-        print(f"✅ التأكيد المطلوب: {self.config['REQUIRED_CONFIRMATIONS']} إشارات")
+        print(f"✅ التأكيد المطلوب: {self.config['REQUIRED_CONFIRMATIONS']} إشارات مختلفة من نفس المجموعة")
         print(f"📊 الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
     
     def setup_config(self):
@@ -320,7 +320,8 @@ class TradingSystem:
         # إزالة المحتوى بين الأقواس والأرقام
         cleaned = re.sub(r'\[.*?\]|\(.*?\)|\d+\.?\d*', '', signal_type)
         # إزالة الفراغات الزائدة
-        return ' '.join(cleaned.split()).strip()
+        cleaned = ' '.join(cleaned.split()).strip()
+        return cleaned
     
     def handle_trend_signal(self, signal_data):
         """معالجة إشارات الاتجاه"""
@@ -362,7 +363,7 @@ class TradingSystem:
         return True
     
     def handle_entry_signal(self, signal_data, signal_category):
-        """معالجة إشارات الدخول"""
+        """معالجة إشارات الدخول - تطلب إشارات مختلفة من نفس المجموعة"""
         # التحقق من الحد الأقصى للصفقات
         active_trades_count = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
         if active_trades_count >= self.config['MAX_OPEN_TRADES']:
@@ -376,10 +377,9 @@ class TradingSystem:
                 self.logger.warning("⏹️  الإشارة لا تتطابق مع الاتجاه الحالي")
                 return False
         
-        # نظام التأكيد
+        # نظام التأكيد - يتطلب إشارات مختلفة من نفس المجموعة
         ticker = signal_data['ticker']
-        direction = 'bullish' if signal_category == 'entry_bullish' else 'bearish'
-        signal_key = f"{ticker}_{direction}"
+        signal_key = f"{ticker}_{signal_category}"
         
         # تنظيف الإشارات المنتهية
         self.clean_expired_signals()
@@ -389,22 +389,28 @@ class TradingSystem:
             self.pending_signals[signal_key] = {
                 'unique_signals': set(),
                 'signals_data': [],
-                'created_at': datetime.now()
+                'created_at': datetime.now(),
+                'signal_category': signal_category  # تخزين نوع المجموعة
             }
         
-        # إضافة الإشارة إذا كانت فريدة
-        if signal_data['signal_type'] not in self.pending_signals[signal_key]['unique_signals']:
-            self.pending_signals[signal_key]['unique_signals'].add(signal_data['signal_type'])
+        # التحقق من أن الإشارة مختلفة ولم تُضاف من قبل
+        signal_type_clean = self.clean_signal_type(signal_data['signal_type'])
+        if signal_type_clean not in self.pending_signals[signal_key]['unique_signals']:
+            self.pending_signals[signal_key]['unique_signals'].add(signal_type_clean)
             self.pending_signals[signal_key]['signals_data'].append(signal_data)
             self.pending_signals[signal_key]['updated_at'] = datetime.now()
-            self.logger.info(f"📥 إشارة فريدة: {signal_data['signal_type']}")
+            self.logger.info(f"📥 إشارة فريدة: {signal_data['signal_type']} للمجموعة {signal_category}")
+        else:
+            self.logger.info(f"⏭️  تجاهل إشارة مكررة: {signal_data['signal_type']}")
+            return True  # نعود بنجاح لكن لا نضيف إشارة مكررة
         
         # التحقق من اكتمال التأكيد
         unique_count = len(self.pending_signals[signal_key]['unique_signals'])
         if unique_count >= self.config['REQUIRED_CONFIRMATIONS']:
             return self.open_confirmed_trade(signal_key, signal_category)
         else:
-            self.logger.info(f"⏳ في انتظار التأكيد: {unique_count}/{self.config['REQUIRED_CONFIRMATIONS']}")
+            current_signals = list(self.pending_signals[signal_key]['unique_signals'])
+            self.logger.info(f"⏳ في انتظار التأكيد: {unique_count}/{self.config['REQUIRED_CONFIRMATIONS']} - الإشارات: {current_signals}")
             return True
     
     def clean_expired_signals(self):
@@ -424,6 +430,13 @@ class TradingSystem:
     def open_confirmed_trade(self, signal_key, signal_category):
         """فتح صفقة مؤكدة"""
         pending_data = self.pending_signals[signal_key]
+        
+        # التأكد من أن لدينا إشارات كافية ومختلفة
+        if len(pending_data['unique_signals']) < self.config['REQUIRED_CONFIRMATIONS']:
+            self.logger.error(f"❌ عدد الإشارات غير كافٍ: {len(pending_data['unique_signals'])}")
+            return False
+        
+        # استخدام أول إشارة كإشارة رئيسية
         main_signal = pending_data['signals_data'][0]
         
         trade_id = str(uuid.uuid4())[:8]
@@ -436,7 +449,8 @@ class TradingSystem:
             'signal_type': main_signal['signal_type'],
             'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'status': 'OPEN',
-            'confirmation_count': len(pending_data['unique_signals'])
+            'confirmation_count': len(pending_data['unique_signals']),
+            'confirmed_signals': list(pending_data['unique_signals'])
         }
         
         self.active_trades[trade_id] = trade_info
@@ -449,7 +463,8 @@ class TradingSystem:
         # تنظيف الإشارات المعلقة
         del self.pending_signals[signal_key]
         
-        self.logger.info(f"📈 فتح صفقة {direction} (#{trade_id}) بـ {trade_info['confirmation_count']} إشارات")
+        unique_signals_list = list(pending_data['unique_signals'])
+        self.logger.info(f"📈 فتح صفقة {direction} (#{trade_id}) بـ {trade_info['confirmation_count']} إشارات مختلفة: {unique_signals_list}")
         return True
     
     def handle_exit_signal(self, signal_data):
@@ -559,7 +574,7 @@ class TradingSystem:
             self.logger.error(f"❌ خطأ في إرسال Telegram: {e}")
             return False
     
-    # 🔧 دوال تنسيق الرسائل - محدثة حسب الطلب
+    # 🔧 دوال تنسيق الرسائل
     def format_trend_message(self, signal_data, trend_icon, trend_text):
         """تنسيق رسالة الاتجاه"""
         return f"""
@@ -729,7 +744,7 @@ class TradingSystem:
         print(f"   🔔 إشعارات الدخول: {'مفعّل' if self.config['SEND_ENTRY_MESSAGES'] else 'معطل'}")
         print(f"   🔔 إشعارات الخروج: {'مفعّل' if self.config['SEND_EXIT_MESSAGES'] else 'معطل'}")
         print(f"   🔔 إشعارات عامة: {'مفعّل' if self.config['SEND_GENERAL_MESSAGES'] else 'معطل'}")
-        print(f"   📊 التأكيدات المطلوبة: {self.config['REQUIRED_CONFIRMATIONS']}")
+        print(f"   📊 التأكيدات المطلوبة: {self.config['REQUIRED_CONFIRMATIONS']} إشارات مختلفة من نفس المجموعة")
         print(f"   📈 الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
     
     def handle_test(self, request):
