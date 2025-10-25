@@ -215,6 +215,14 @@ class TradingSystem:
             print(f"   ❌ فشل الاتصال الأساسي: {e}")
 
         print(f"   🗺️  فحص المسار: /sendMessage")
+                # ✅ تأكيد الاتجاه عند استقبال tracer
+        if 'tracer' in signal_type.lower():
+            if current_trend == new_trend:
+                message = self.format_trend_confirmation_message(signal_data, trend_icon, trend_text)
+                if self.should_send_message('confirmation', signal_data):
+                    self.send_telegram(message)
+                self.send_to_external_server_with_retry(message, 'trend_confirmation')
+                self.logger.info(f"📌 تأكيد اتجاه: {symbol} ({new_trend})")
         return True
 
     def check_settings(self):
@@ -778,6 +786,21 @@ class TradingSystem:
     # =============================
     # الإرسال (مع الحفاظ على نفس قوالب الرسائل)
     # =============================
+    def format_trend_confirmation_message(self, signal_data, trend_icon, trend_text):
+        symbol = signal_data['ticker']
+        signal = signal_data['signal_type']
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return (
+            "✅ 📊 تأكيـــــد الاتجــــاه 📊 ✅\n"
+            "┏━━━━━━━━━━━━━━━━━━━━\n"
+            f"┃ 💰 الرمز: {symbol}\n"
+            f"┃ 📈 الاتجاه المؤكد: {trend_icon} {trend_text}\n"
+            f"┃ 📋 الإشارة: {signal}\n"
+            "┃ ✅ الحالة: تأكيد مطابقة الاتجاه العام\n"
+            "┗━━━━━━━━━━━━━━━━━━━━\n"
+            f"🕐 {timestamp}"
+        )
+
     def send_telegram(self, message):
         """إرسال رسالة إلى Telegram - يحافظ على نفس الشكل"""
         print(f"🔍 محاولة إرسال رسالة إلى Telegram...")
