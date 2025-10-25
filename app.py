@@ -815,42 +815,33 @@ class TradingSystem:
             return False
 
     def send_to_external_server(self, message_text, message_type):
-        """إرسال نفس نص رسالة Telegram إلى الخادم الخارجي *حرفيًا* كـ RAW UTF-8
-        - بدون JSON
-        - بدون form-data
-        - بدون مفاتيح إضافية
-        - نفس النص تمامًا كما هو
-        """
+        """إرسال الرسالة للقروب الاحتياطي بنفس الشكل 1:1 باستخدام Form-Data field=message"""
         if not self.config['EXTERNAL_SERVER_ENABLED']:
             return False
         if not self.config['EXTERNAL_SERVER_URL'] or self.config['EXTERNAL_SERVER_URL'] == 'https://api.example.com/webhook/trading':
             return False
         try:
-            # نرسل النص الخام مباشرةً في جسم الطلب
-            headers = {'Content-Type': 'text/plain; charset=utf-8'}
             response = requests.post(
                 self.config['EXTERNAL_SERVER_URL'],
-                data=message_text.encode('utf-8'),
-                headers=headers,
-                timeout=10,
-                verify=False
+                data={"message": message_text},
+                timeout=10
             )
             if response.status_code in [200, 201, 204]:
-                print("✅ تم الإرسال كنص خام (text/plain) مطابق 1:1")
-                self.logger.info("تم إرسال الرسالة كنص خام إلى الخادم الخارجي")
+                print("✅ تم إرسال الرسالة للخادم الاحتياطي بنجاح (مطابقة 1:1)")
+                self.logger.info("تم إرسال الرسالة للخادم الاحتياطي")
                 return True
             else:
-                print(f"❌ الخادم الخارجي أعاد كود: {response.status_code}")
+                print(f"❌ الخادم أعاد كود: {response.status_code}")
                 try:
-                    print(f"📋 الاستجابة: {response.text[:200]}")
-                except Exception:
+                    print(response.text[:200])
+                except:
                     pass
                 return False
         except Exception as e:
-            print(f"💥 فشل إرسال النص الخام إلى الخادم الخارجي: {e}")
+            print(f"💥 فشل إرسال رسالة للخادم الاحتياطي: {e}")
             return False
 
-    def send_to_external_server_with_retry(self, message_text, message_type, max_retries=2):(self, message_text, message_type, max_retries=2):
+    def send_to_external_server_with_retry(self, message_text, message_type, max_retries=2):(self, message_text, message_type, max_retries=2):(self, message_text, message_type, max_retries=2):
         """إرسال مع إعادة المحاولة التلقائية"""
         for attempt in range(max_retries + 1):
             success = self.send_to_external_server(message_text, message_type)
