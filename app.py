@@ -12,6 +12,7 @@ import requests
 import platform
 import sys
 import socket
+import time
 from datetime import datetime
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -967,7 +968,6 @@ class TradingSystem:
             elif attempt < max_retries:
                 wait_time = 2 ** attempt  # exponential backoff
                 print(f"🔄 إعادة المحاولة بعد {wait_time} ثواني... ({attempt + 1}/{max_retries})")
-                import time
                 time.sleep(wait_time)
         
         return False
@@ -1133,7 +1133,7 @@ class TradingSystem:
                 "SEND_EXIT_MESSAGES": self.config['SEND_EXIT_MESSAGES'],
                 "SEND_CONFIRMATION_MESSAGES": self.config['SEND_CONFIRMATION_MESSAGES'],
                 "SEND_GENERAL_MESSAGES": self.config['SEND_GENERAL_MESSAGES'],
-                "SEND_BULLISH_SIGNALS': self.config['SEND_BULLISH_SIGNALS'],
+                "SEND_BULLISH_SIGNALS": self.config['SEND_BULLISH_SIGNALS'],
                 "SEND_BEARISH_SIGNALS": self.config['SEND_BEARISH_SIGNALS']
             },
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
