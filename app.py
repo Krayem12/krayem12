@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-نظام معالجة إشارات التداول - النسخة المعدلة مع اتجاه منفصل لكل رمز وإصلاح مشكلة Windows وفحص Telegram
+نظام معالجة إشارات التداول - النسخة المعدلة مع اتجاه منفصل لكل رمز وإصلاح مشكلة Windows وفحص Telegram والخادم الخارجي
 """
 
 import os
@@ -27,7 +27,7 @@ class TradingSystem:
         self.setup_managers()
         self.setup_flask()
         self.display_loaded_signals()
-        self.check_telegram_settings()  # ✅ فحص إعدادات Telegram
+        self.check_settings()  # ✅ فحص إعدادات Telegram والخادم الخارجي
         
         print(f"🚀 نظام معالجة الإشارات جاهز - المنفذ {self.port}")
         print(f"✅ التأكيد المطلوب: {self.config['REQUIRED_CONFIRMATIONS']} إشارات مختلفة من نفس المجموعة")
@@ -200,8 +200,8 @@ class TradingSystem:
         
         self.logger.addHandler(stream_handler)
     
-    def check_telegram_settings(self):
-        """فحص إعدادات Telegram"""
+    def check_settings(self):
+        """فحص إعدادات Telegram والخادم الخارجي"""
         print("\n🔍 فحص إعدادات Telegram:")
         print(f"   TELEGRAM_ENABLED: {self.config['TELEGRAM_ENABLED']}")
         print(f"   TELEGRAM_BOT_TOKEN: {'****' + self.config['TELEGRAM_BOT_TOKEN'][-4:] if self.config['TELEGRAM_BOT_TOKEN'] and self.config['TELEGRAM_BOT_TOKEN'] != 'your_bot_token_here' else 'غير مضبوط'}")
@@ -217,6 +217,19 @@ class TradingSystem:
             print(f"   حالة الاتصال: {'✅ نجح' if test_result else '❌ فشل'}")
         else:
             print("   ⚠️  إعدادات Telegram غير مكتملة")
+        
+        print("\n🔍 فحص إعدادات الخادم الخارجي:")
+        print(f"   EXTERNAL_SERVER_ENABLED: {self.config['EXTERNAL_SERVER_ENABLED']}")
+        print(f"   EXTERNAL_SERVER_URL: {self.config['EXTERNAL_SERVER_URL']}")
+        print(f"   EXTERNAL_SERVER_TOKEN: {'****' + self.config['EXTERNAL_SERVER_TOKEN'][-4:] if self.config['EXTERNAL_SERVER_TOKEN'] and self.config['EXTERNAL_SERVER_TOKEN'] != 'your_external_server_token_here' else 'غير مضبوط'}")
+        
+        # اختبار الاتصال بالخادم الخارجي
+        if self.config['EXTERNAL_SERVER_ENABLED'] and self.config['EXTERNAL_SERVER_URL'] and self.config['EXTERNAL_SERVER_URL'] != 'https://api.example.com/webhook/trading':
+            print("   🌐 اختبار الاتصال بالخادم الخارجي...")
+            test_result = self.test_external_server_connection()
+            print(f"   حالة الاتصال: {'✅ نجح' if test_result else '❌ فشل'}")
+        else:
+            print("   ⚠️  إعدادات الخادم الخارجي غير مكتملة")
 
     def test_telegram_connection(self):
         """اختبار الاتصال بـ Telegram"""
@@ -226,6 +239,32 @@ class TradingSystem:
             return response.status_code == 200
         except Exception as e:
             print(f"   ❌ خطأ في اختبار الاتصال: {e}")
+            return False
+
+    def test_external_server_connection(self):
+        """اختبار الاتصال بالخادم الخارجي"""
+        try:
+            headers = {'Content-Type': 'application/json'}
+            if self.config['EXTERNAL_SERVER_TOKEN'] and self.config['EXTERNAL_SERVER_TOKEN'] != 'your_external_server_token_here':
+                headers['Authorization'] = f"Bearer {self.config['EXTERNAL_SERVER_TOKEN']}"
+            
+            # إرسال طلب اختبار
+            test_payload = {
+                'test': True,
+                'message': 'اتصال اختبار من نظام الإشارات',
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            response = requests.post(
+                self.config['EXTERNAL_SERVER_URL'],
+                json=test_payload,
+                headers=headers,
+                timeout=10
+            )
+            
+            return response.status_code in [200, 201]
+        except Exception as e:
+            print(f"   ❌ خطأ في اختبار الاتصال بالخادم الخارجي: {e}")
             return False
 
     def setup_routes(self):
@@ -433,9 +472,15 @@ class TradingSystem:
         # إرسال الإشعار إذا تغير الاتجاه أو أول مرة لهذا الرمز
         should_notify = (trend_changed or self.last_trend_notifications.get(symbol) != new_trend)
         
-        if should_notify and self.config['SEND_TREND_MESSAGES']:
-            message = self.format_trend_message(signal_data, trend_icon, trend_text)
-            self.send_telegram(message)
+        if should_notify:
+            # إرسال إلى Telegram إذا كان مفعلاً
+            if self.config['SEND_TREND_MESSAGES']:
+                message = self.format_trend_message(signal_data, trend_icon, trend_text)
+                self.send_telegram(message)
+            
+            # إرسال إلى الخادم الخارجي إذا كان مفعلاً
+            self.send_to_external_server(signal_data, 'trend')
+            
             self.last_trend_notifications[symbol] = new_trend
             self.logger.info(f"إشعار اتجاه للرمز {symbol}: {new_trend}")
         
@@ -558,6 +603,17 @@ class TradingSystem:
             message = self.format_entry_message(trade_info, pending_data)
             self.send_telegram(message)
         
+        # إرسال إلى الخادم الخارجي
+        external_signal_data = {
+            'ticker': trade_info['ticker'],
+            'signal_type': trade_info['signal_type'],
+            'direction': trade_info['direction'],
+            'trade_id': trade_info['trade_id'],
+            'confirmation_count': trade_info['confirmation_count'],
+            'timestamp': trade_info['entry_time']
+        }
+        self.send_to_external_server(external_signal_data, 'entry')
+        
         # تنظيف الإشارات المعلقة
         del self.pending_signals[signal_key]
         
@@ -584,6 +640,17 @@ class TradingSystem:
             message = self.format_exit_message(trade)
             self.send_telegram(message)
         
+        # إرسال إلى الخادم الخارجي
+        external_signal_data = {
+            'ticker': trade['ticker'],
+            'signal_type': signal_data['signal_type'],
+            'trade_id': trade['trade_id'],
+            'direction': trade['direction'],
+            'status': 'CLOSED',
+            'timestamp': trade['exit_time']
+        }
+        self.send_to_external_server(external_signal_data, 'exit')
+        
         self.logger.info(f"إغلاق صفقة #{trade['trade_id']}")
         return True
     
@@ -593,6 +660,9 @@ class TradingSystem:
             message = self.format_confirmation_message(signal_data)
             self.send_telegram(message)
         
+        # إرسال إلى الخادم الخارجي
+        self.send_to_external_server(signal_data, 'trend_confirmation')
+        
         self.logger.info(f"تأكيد اتجاه: {signal_data['signal_type']}")
         return True
     
@@ -601,6 +671,9 @@ class TradingSystem:
         if self.config['SEND_GENERAL_MESSAGES']:
             message = self.format_general_message(signal_data)
             self.send_telegram(message)
+        
+        # إرسال إلى الخادم الخارجي
+        self.send_to_external_server(signal_data, 'general')
         
         self.logger.info(f"إشارة عامة: {signal_data['signal_type']}")
         return True
@@ -695,6 +768,59 @@ class TradingSystem:
         except Exception as e:
             print(f"❌ خطأ في إرسال Telegram: {e}")
             self.logger.error(f"خطأ في إرسال Telegram: {e}")
+            return False
+
+    def send_to_external_server(self, signal_data, message_type):
+        """إرسال الإشارة إلى الخادم الخارجي"""
+        if not self.config['EXTERNAL_SERVER_ENABLED']:
+            return False
+        
+        if not self.config['EXTERNAL_SERVER_URL'] or self.config['EXTERNAL_SERVER_URL'] == 'https://api.example.com/webhook/trading':
+            print("❌ رابط الخادم الخارجي غير مضبوط")
+            return False
+        
+        try:
+            # تحضير البيانات للإرسال
+            payload = {
+                'signal': signal_data,
+                'message_type': message_type,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'system_info': {
+                    'app_name': self.config['APP_NAME'],
+                    'app_version': self.config['APP_VERSION']
+                }
+            }
+            
+            # إضافة التوكن إذا كان مضبوطاً
+            headers = {'Content-Type': 'application/json'}
+            if self.config['EXTERNAL_SERVER_TOKEN'] and self.config['EXTERNAL_SERVER_TOKEN'] != 'your_external_server_token_here':
+                headers['Authorization'] = f"Bearer {self.config['EXTERNAL_SERVER_TOKEN']}"
+            
+            print(f"🔗 محاولة الإرسال إلى الخادم الخارجي: {self.config['EXTERNAL_SERVER_URL']}")
+            print(f"📤 نوع الرسالة: {message_type}")
+            
+            response = requests.post(
+                self.config['EXTERNAL_SERVER_URL'],
+                json=payload,
+                headers=headers,
+                timeout=10
+            )
+            
+            success = response.status_code in [200, 201]
+            
+            if success:
+                print(f"✅ تم إرسال الإشارة إلى الخادم الخارجي بنجاح: {response.status_code}")
+                self.logger.info(f"تم إرسال الإشارة إلى الخادم الخارجي: {message_type}")
+            else:
+                print(f"❌ فشل إرسال إلى الخادم الخارجي: {response.status_code}")
+                print(f"📋 تفاصيل الخطأ: {response.text}")
+                self.logger.error(f"فشل إرسال إلى الخادم الخارجي: {response.status_code} - {response.text}")
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ خطأ في إرسال إلى الخادم الخارجي: {e}")
+            self.logger.error(f"خطأ في إرسال إلى الخادم الخارجي: {e}")
             return False
     
     # 🔧 دوال تنسيق الرسائل
@@ -851,6 +977,7 @@ class TradingSystem:
             "trends_count": len(self.symbol_trends),
             "required_confirmations": self.config['REQUIRED_CONFIRMATIONS'],
             "telegram_enabled": self.config['TELEGRAM_ENABLED'],
+            "external_server_enabled": self.config['EXTERNAL_SERVER_ENABLED'],
             "message_controls": {
                 "SEND_TREND_MESSAGES": self.config['SEND_TREND_MESSAGES'],
                 "SEND_ENTRY_MESSAGES": self.config['SEND_ENTRY_MESSAGES'],
@@ -881,6 +1008,9 @@ class TradingSystem:
         print(f"   📊 التأكيدات المطلوبة: {self.config['REQUIRED_CONFIRMATIONS']} إشارات مختلفة من نفس المجموعة")
         print(f"   📈 الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
         print(f"   🎯 نظام اتجاه منفصل لكل رمز: مفعّل")
+        print(f"   🌐 الخادم الخارجي: {'مفعّل' if self.config['EXTERNAL_SERVER_ENABLED'] else 'معطل'}")
+        if self.config['EXTERNAL_SERVER_ENABLED']:
+            print(f"   🔗 رابط الخادم: {self.config['EXTERNAL_SERVER_URL']}")
     
     def handle_test(self, request):
         """معالجة صفحة الاختبار"""
