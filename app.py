@@ -857,3 +857,12 @@ class TradingSystem:
                 print(f"🔄 إعادة المحاولة بعد {wait_time} ثواني... ({attempt + 1}/{max_retries})")
                 time.sleep(wait_time)
         return False
+
+# =============================
+# تشغيل النظام
+# =============================
+system = TradingSystem()
+app = system.app
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=system.port)
