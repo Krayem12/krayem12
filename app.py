@@ -473,13 +473,15 @@ class TradingSystem:
         should_notify = (trend_changed or self.last_trend_notifications.get(symbol) != new_trend)
         
         if should_notify:
+            # بناء الرسالة النصية
+            message = self.format_trend_message(signal_data, trend_icon, trend_text)
+            
             # إرسال إلى Telegram إذا كان مفعلاً
             if self.config['SEND_TREND_MESSAGES']:
-                message = self.format_trend_message(signal_data, trend_icon, trend_text)
                 self.send_telegram(message)
             
-            # إرسال إلى الخادم الخارجي إذا كان مفعلاً
-            self.send_to_external_server(signal_data, 'trend')
+            # إرسال نفس الرسالة إلى الخادم الخارجي
+            self.send_to_external_server(message, 'trend')
             
             self.last_trend_notifications[symbol] = new_trend
             self.logger.info(f"إشعار اتجاه للرمز {symbol}: {new_trend}")
@@ -579,7 +581,7 @@ class TradingSystem:
             self.logger.error(f"عدد الإشارات غير كافٍ: {len(pending_data['unique_signals'])}")
             return False
         
-        # استخدام أول إشارة كإشارة رئيسية
+        # استخدام أول إشارة كإشارة الرئيسية
         main_signal = pending_data['signals_data'][0]
         
         trade_id = str(uuid.uuid4())[:8]
@@ -598,21 +600,15 @@ class TradingSystem:
         
         self.active_trades[trade_id] = trade_info
         
+        # بناء الرسالة النصية
+        message = self.format_entry_message(trade_info, pending_data)
+        
         # إرسال إشعار الدخول بالنموذج المطلوب
         if self.config['SEND_ENTRY_MESSAGES']:
-            message = self.format_entry_message(trade_info, pending_data)
             self.send_telegram(message)
         
-        # إرسال إلى الخادم الخارجي
-        external_signal_data = {
-            'ticker': trade_info['ticker'],
-            'signal_type': trade_info['signal_type'],
-            'direction': trade_info['direction'],
-            'trade_id': trade_info['trade_id'],
-            'confirmation_count': trade_info['confirmation_count'],
-            'timestamp': trade_info['entry_time']
-        }
-        self.send_to_external_server(external_signal_data, 'entry')
+        # إرسال نفس الرسالة إلى الخادم الخارجي
+        self.send_to_external_server(message, 'entry')
         
         # تنظيف الإشارات المعلقة
         del self.pending_signals[signal_key]
@@ -635,45 +631,43 @@ class TradingSystem:
             'exit_signal': signal_data['signal_type']
         })
         
+        # بناء الرسالة النصية
+        message = self.format_exit_message(trade)
+        
         # إرسال إشعار الخروج
         if self.config['SEND_EXIT_MESSAGES']:
-            message = self.format_exit_message(trade)
             self.send_telegram(message)
         
-        # إرسال إلى الخادم الخارجي
-        external_signal_data = {
-            'ticker': trade['ticker'],
-            'signal_type': signal_data['signal_type'],
-            'trade_id': trade['trade_id'],
-            'direction': trade['direction'],
-            'status': 'CLOSED',
-            'timestamp': trade['exit_time']
-        }
-        self.send_to_external_server(external_signal_data, 'exit')
+        # إرسال نفس الرسالة إلى الخادم الخارجي
+        self.send_to_external_server(message, 'exit')
         
         self.logger.info(f"إغلاق صفقة #{trade['trade_id']}")
         return True
     
     def handle_trend_confirmation(self, signal_data):
         """معالجة تأكيد الاتجاه"""
+        # بناء الرسالة النصية
+        message = self.format_confirmation_message(signal_data)
+        
         if self.config['SEND_CONFIRMATION_MESSAGES']:
-            message = self.format_confirmation_message(signal_data)
             self.send_telegram(message)
         
-        # إرسال إلى الخادم الخارجي
-        self.send_to_external_server(signal_data, 'trend_confirmation')
+        # إرسال نفس الرسالة إلى الخادم الخارجي
+        self.send_to_external_server(message, 'trend_confirmation')
         
         self.logger.info(f"تأكيد اتجاه: {signal_data['signal_type']}")
         return True
     
     def handle_general_signal(self, signal_data):
         """معالجة الإشارات العامة"""
+        # بناء الرسالة النصية
+        message = self.format_general_message(signal_data)
+        
         if self.config['SEND_GENERAL_MESSAGES']:
-            message = self.format_general_message(signal_data)
             self.send_telegram(message)
         
-        # إرسال إلى الخادم الخارجي
-        self.send_to_external_server(signal_data, 'general')
+        # إرسال نفس الرسالة إلى الخادم الخارجي
+        self.send_to_external_server(message, 'general')
         
         self.logger.info(f"إشارة عامة: {signal_data['signal_type']}")
         return True
@@ -770,8 +764,8 @@ class TradingSystem:
             self.logger.error(f"خطأ في إرسال Telegram: {e}")
             return False
 
-    def send_to_external_server(self, signal_data, message_type):
-        """إرسال الإشارة إلى الخادم الخارجي"""
+    def send_to_external_server(self, message_text, message_type):
+        """إرسال نفس رسالة Telegram إلى الخادم الخارجي"""
         if not self.config['EXTERNAL_SERVER_ENABLED']:
             return False
         
@@ -780,9 +774,9 @@ class TradingSystem:
             return False
         
         try:
-            # تحضير البيانات للإرسال
+            # إرسال نفس الرسالة النصية بالضبط التي نرسلها لـ Telegram
             payload = {
-                'signal': signal_data,
+                'message': message_text,  # نفس الرسالة النصية
                 'message_type': message_type,
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'system_info': {
@@ -791,13 +785,11 @@ class TradingSystem:
                 }
             }
             
-            # إضافة التوكن إذا كان مضبوطاً
             headers = {'Content-Type': 'application/json'}
-            if self.config['EXTERNAL_SERVER_TOKEN'] and self.config['EXTERNAL_SERVER_TOKEN'] != 'your_external_server_token_here':
-                headers['Authorization'] = f"Bearer {self.config['EXTERNAL_SERVER_TOKEN']}"
             
             print(f"🔗 محاولة الإرسال إلى الخادم الخارجي: {self.config['EXTERNAL_SERVER_URL']}")
             print(f"📤 نوع الرسالة: {message_type}")
+            print(f"📝 محتوى الرسالة: {message_text[:100]}...")  # عرض جزء من الرسالة
             
             response = requests.post(
                 self.config['EXTERNAL_SERVER_URL'],
@@ -809,8 +801,8 @@ class TradingSystem:
             success = response.status_code in [200, 201]
             
             if success:
-                print(f"✅ تم إرسال الإشارة إلى الخادم الخارجي بنجاح: {response.status_code}")
-                self.logger.info(f"تم إرسال الإشارة إلى الخادم الخارجي: {message_type}")
+                print(f"✅ تم إرسال الرسالة إلى الخادم الخارجي بنجاح: {response.status_code}")
+                self.logger.info(f"تم إرسال الرسالة إلى الخادم الخارجي: {message_type}")
             else:
                 print(f"❌ فشل إرسال إلى الخادم الخارجي: {response.status_code}")
                 print(f"📋 تفاصيل الخطأ: {response.text}")
