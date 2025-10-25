@@ -786,18 +786,132 @@ class TradingSystem:
     # =============================
     # الإرسال (مع الحفاظ على نفس قوالب الرسائل)
     # =============================
+    def format_trend_message(self, signal_data, trend_icon, trend_text):
+        symbol = signal_data['ticker']
+        signal = signal_data['signal_type']
+        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        return (
+            "☰☰☰ 📊 الاتجاه العام ☰☰☰
+"
+            "┏━━━━━━━━━━━━━━━━━━━━
+"
+            f"┃ 💰 الرمز: {symbol}
+"
+            f"┃ 📈 الاتجاه: {trend_icon} {trend_text}
+"
+            f"┃ 📋 الإشارة: {signal}
+"
+            "┃ 🔄 الحالة: الاتجاه العام محدث
+"
+            "┗━━━━━━━━━━━━━━━━━━━━
+"
+            f"🕐 {timestamp}"
+        )
+
     def format_trend_confirmation_message(self, signal_data, trend_icon, trend_text):
+        symbol = signal_data['ticker']
+        signal = signal_data['signal_type']
+        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        return (
+            "✅ 📊 تأكيـــــد الاتجــــاه 📊 ✅
+"
+            "┏━━━━━━━━━━━━━━━━━━━━
+"
+            f"┃ 💰 الرمز: {symbol}
+"
+            f"┃ 📈 الاتجاه المؤكد: {trend_icon} {trend_text}
+"
+            f"┃ 📋 الإشارة: {signal}
+"
+            "┃ ✅ الحالة: تأكيد مطابقة الاتجاه العام
+"
+            "┗━━━━━━━━━━━━━━━━━━━━
+"
+            f"🕐 {timestamp}"
+        )(self, signal_data, trend_icon, trend_text):
         symbol = signal_data['ticker']
         signal = signal_data['signal_type']
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         return (
-            "✅ 📊 تأكيـــــد الاتجــــاه 📊 ✅\n"
-            "┏━━━━━━━━━━━━━━━━━━━━\n"
-            f"┃ 💰 الرمز: {symbol}\n"
-            f"┃ 📈 الاتجاه المؤكد: {trend_icon} {trend_text}\n"
-            f"┃ 📋 الإشارة: {signal}\n"
-            "┃ ✅ الحالة: تأكيد مطابقة الاتجاه العام\n"
-            "┗━━━━━━━━━━━━━━━━━━━━\n"
+            "✅ 📊 تأكيـــــد الاتجــــاه 📊 ✅
+"
+            "┏━━━━━━━━━━━━━━━━━━━━
+"
+            f"┃ 💰 الرمز: {symbol}
+"
+            f"┃ 📈 الاتجاه المؤكد: {trend_icon} {trend_text}
+"
+            f"┃ 📋 الإشارة: {signal}
+"
+            "┃ ✅ الحالة: تأكيد مطابقة الاتجاه العام
+"
+            "┗━━━━━━━━━━━━━━━━━━━━
+"
+            f"🕐 {timestamp}"
+        )
+
+    def format_entry_message(self, trade_info, pending_data):
+        symbol = trade_info['ticker']
+        direction = trade_info['direction']
+        signal = trade_info['signal_type']
+        confirmations = trade_info.get('confirmation_count', 1)
+        helpers = trade_info.get('confirmed_signals', [])
+        trend = self.symbol_trends.get(symbol, '')
+        trend_icon = '🟢📈 BULLISH' if trend == 'BULLISH' else '🔴📉 BEARISH'
+        align_text = '🟢 مطابق للاتجاه العام' if ((direction=='CALL' and trend=='BULLISH') or (direction=='PUT' and trend=='BEARISH')) else '🔴 غير مطابق'
+        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        helpers_list = ''
+        if len(helpers) > 1:
+            numbered = [f"┃   {i+1}. {h}" for i,h in enumerate(helpers[1:])]
+            helpers_list = "
+" + "
+".join(numbered)
+        return (
+            "✦✦✦ 🚀 دخـــــول صفـــــقة ✦✦✦
+"
+            "┏━━━━━━━━━━━━━━━━━━━━
+"
+            f"┃ 💰 الرمز: {symbol}
+"
+            f"┃ 🎯 نوع الصفقة: {'🟢 شراء' if direction=='CALL' else '🔴 بيع'}
+"
+            f"┃ 📊 اتجاه الرمز: {trend_icon}
+"
+            f"┃ 🎯 محاذاة الاتجاه: {align_text}
+"
+            f"┃ 📋 الإشارة الرئيسية: {signal} (تم التأكيد بـ {confirmations} إشارات)
+"
+            f"┃ 🔔 الإشارات المساعدة: {len(helpers)-1} إشارة" + helpers_list + "
+"
+            f"┃ 📊 الصفقات المفتوحة: {len([t for t in self.active_trades.values() if t['status']=='OPEN'])} من {self.config['MAX_OPEN_TRADES']}
+"
+            "┗━━━━━━━━━━━━━━━━━━━━
+"
+            f"🕐 {timestamp}"
+        )
+
+    def format_exit_message(self, trade):
+        symbol = trade['ticker']
+        exit_signal = trade.get('exit_signal','غير محدد')
+        direction = trade.get('direction','CALL')
+        direction_text = '🟢 شراء' if direction=='CALL' else '🔴 بيع (PUT)'
+        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        open_count = len([t for t in self.active_trades.values() if t['status']=='OPEN'])
+        return (
+            "════ 🚪 إشـــــــارة خــــــروج ════
+"
+            "┏━━━━━━━━━━━━━━━━━━━━
+"
+            f"┃ 💰 الرمز: {symbol}
+"
+            f"┃ 📝 السبب: إشارة خروج: {exit_signal}
+"
+            f"┃ 🎯 نوع الصفقة المغلقة: {direction_text}
+"
+            f"┃ 📊 الصفقات المفتوحة: {open_count}/{self.config['MAX_OPEN_TRADES']}
+"
+            "┗━━━━━━━━━━━━━━━━━━━━
+"
             f"🕐 {timestamp}"
         )
 
