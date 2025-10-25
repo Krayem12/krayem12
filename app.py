@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-نظام معالجة إشارات التداول - النسخة المعدلة مع منع الإشارات المكررة
+نظام معالجة إشارات التداول - النسخة المعدلة مع اتجاه منفصل لكل رمز وإصلاح مشكلة Windows
 """
 
 import os
@@ -9,6 +9,8 @@ import logging
 import uuid
 import re
 import requests
+import platform
+import sys
 from datetime import datetime
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -18,7 +20,7 @@ from decouple import config
 load_dotenv()
 
 class TradingSystem:
-    """النظام الرئيسي المدمج لإشارات التداول"""
+    """النظام الرئيسي المدمج لإشارات التداول مع اتجاه منفصل لكل رمز"""
     
     def __init__(self):
         self.setup_config()
@@ -29,6 +31,7 @@ class TradingSystem:
         print(f"🚀 نظام معالجة الإشارات جاهز - المنفذ {self.port}")
         print(f"✅ التأكيد المطلوب: {self.config['REQUIRED_CONFIRMATIONS']} إشارات مختلفة من نفس المجموعة")
         print(f"📊 الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
+        print(f"🎯 نظام اتجاه منفصل لكل رمز: مفعّل")
     
     def setup_config(self):
         """إعداد التكوين الكامل من .env"""
@@ -125,8 +128,9 @@ class TradingSystem:
         """إعداد المديرين الداخليين"""
         self.pending_signals = {}
         self.active_trades = {}
-        self.current_trend = None
-        self.last_trend_notification = None
+        # ✅ نظام اتجاهات منفصل لكل رمز
+        self.symbol_trends = {}  # تخزين الاتجاه لكل رمز {symbol: trend}
+        self.last_trend_notifications = {}  # تخزين آخر إشعار لكل رمز
     
     def setup_flask(self):
         """إعداد تطبيق Flask والمسارات"""
@@ -135,16 +139,65 @@ class TradingSystem:
         self.setup_logging()
     
     def setup_logging(self):
-        """إعداد نظام التسجيل"""
-        logging.basicConfig(
-            level=getattr(logging, self.config['LOG_LEVEL']),
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(self.config['LOG_FILE']),
-                logging.StreamHandler()
-            ]
-        )
+        """إعداد نظام التسجيل - معدل لدعم Windows"""
         self.logger = logging.getLogger('trading_system')
+        self.logger.setLevel(getattr(logging, self.config['LOG_LEVEL']))
+        
+        # إزالة أي handlers موجودة مسبقاً
+        for handler in self.logger.handlers[:]:
+            self.logger.removeHandler(handler)
+        
+        # تنسيق الرسائل
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        
+        # Handler للملف (باستخدام UTF-8) - باستخدام مسار مطلق
+        try:
+            # تحديد مسار مطلق لملف السجل في مجلد التطبيق
+            log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.config['LOG_FILE'])
+            file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+            print(f"📁 ملف السجل: {log_file_path}")
+        except Exception as e:
+            print(f"❌ خطأ في إنشاء ملف السجل: {e}")
+            print("⚠️  سيتم استخدام التسجيل في الطرفية فقط")
+        
+        # Handler للطرفية - مع معالجة الرموز التعبيرية في Windows
+        stream_handler = logging.StreamHandler(sys.stdout)
+        
+        # إذا كان النظام Windows، نزيل الرموز التعبيرية من السجل
+        if platform.system() == 'Windows':
+            class NoEmojiFormatter(logging.Formatter):
+                def format(self, record):
+                    import re
+                    # إزالة الرموز التعبيرية من الرسالة
+                    if hasattr(record, 'msg') and record.msg:
+                        record.msg = self.remove_emojis(str(record.msg))
+                    return super().format(record)
+                
+                def remove_emojis(self, text):
+                    """إزالة الرموز التعبيرية من النص"""
+                    try:
+                        # نمط لمطابقة معظم الرموز التعبيرية
+                        emoji_pattern = re.compile(
+                            "["
+                            "\U0001F600-\U0001F64F"  # الرموز التعبيرية
+                            "\U0001F300-\U0001F5FF"  # الرموز والپكترجرام
+                            "\U0001F680-\U0001F6FF"  # رموز النقل والخرائط
+                            "\U0001F1E0-\U0001F1FF"  # أعلام الدول
+                            "\U00002702-\U000027B0"  # رموز متنوعة
+                            "\U000024C2-\U0001F251"  # رموز إضافية
+                            "]+", flags=re.UNICODE
+                        )
+                        return emoji_pattern.sub('', text)
+                    except:
+                        return text
+            
+            stream_handler.setFormatter(NoEmojiFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        else:
+            stream_handler.setFormatter(formatter)
+        
+        self.logger.addHandler(stream_handler)
     
     def setup_routes(self):
         """إعداد مسارات API"""
@@ -184,7 +237,7 @@ class TradingSystem:
             if not raw_signal:
                 return jsonify({"status": "error", "message": "إشارة فارغة"}), 400
             
-            self.logger.info(f"📨 إشارة مستلمة: {raw_signal}")
+            self.logger.info(f"إشارة مستلمة: {raw_signal}")
             success = self.process_signal(raw_signal)
             
             if success:
@@ -200,7 +253,7 @@ class TradingSystem:
                 }), 400
                 
         except Exception as e:
-            self.logger.error(f"❌ خطأ في Webhook: {e}")
+            self.logger.error(f"خطأ في Webhook: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
     
     def extract_signal_data(self, request):
@@ -228,13 +281,13 @@ class TradingSystem:
         """المعالجة الرئيسية للإشارة"""
         signal_data = self.parse_signal(raw_signal)
         if not signal_data:
-            self.logger.warning(f"⚠️  إشارة غير صالحة: {raw_signal}")
+            self.logger.warning(f"إشارة غير صالحة: {raw_signal}")
             return False
         
         signal_category = self.classify_signal(signal_data)
         signal_data['category'] = signal_category
         
-        self.logger.info(f"🎯 إشارة مصنفة: {signal_data['signal_type']} -> {signal_category}")
+        self.logger.info(f"إشارة مصنفة: {signal_data['signal_type']} -> {signal_category}")
         
         # المعالجة حسب التصنيف
         if signal_category == 'trend':
@@ -285,7 +338,7 @@ class TradingSystem:
             }
             
         except Exception as e:
-            self.logger.error(f"❌ خطأ في تحليل الإشارة: {e}")
+            self.logger.error(f"خطأ في تحليل الإشارة: {e}")
             return None
     
     def clean_nan_signal(self, signal_type, raw_signal):
@@ -310,7 +363,7 @@ class TradingSystem:
         for category, signals in self.signals.items():
             for signal in signals:
                 if signal.lower() in signal_type.lower() or signal_type.lower() in signal.lower():
-                    self.logger.info(f"🔍 مطابقة جزئية: {signal_type} -> {signal}")
+                    self.logger.info(f"مطابقة جزئية: {signal_type} -> {signal}")
                     return category
         
         return 'unknown'
@@ -324,8 +377,9 @@ class TradingSystem:
         return cleaned
     
     def handle_trend_signal(self, signal_data):
-        """معالجة إشارات الاتجاه"""
+        """معالجة إشارات الاتجاه - معدل لدعم اتجاه منفصل لكل رمز"""
         signal_type = signal_data['signal_type']
+        symbol = signal_data['ticker']
         
         if 'bullish' in signal_type.lower():
             new_trend = 'BULLISH'
@@ -336,45 +390,56 @@ class TradingSystem:
         else:
             return False
         
-        # التحقق من تغير الاتجاه
-        trend_changed = self.current_trend != new_trend
-        self.current_trend = new_trend
+        # الحصول على الاتجاه الحالي للرمز (إن وجد)
+        current_trend = self.symbol_trends.get(symbol)
         
-        # إرسال الإشعار إذا تغير الاتجاه أو أول مرة
-        if (trend_changed or self.last_trend_notification != new_trend) and self.config['SEND_TREND_MESSAGES']:
+        # التحقق من تغير الاتجاه لهذا الرمز المحدد
+        trend_changed = current_trend != new_trend
+        self.symbol_trends[symbol] = new_trend
+        
+        # إرسال الإشعار إذا تغير الاتجاه أو أول مرة لهذا الرمز
+        should_notify = (trend_changed or self.last_trend_notifications.get(symbol) != new_trend)
+        
+        if should_notify and self.config['SEND_TREND_MESSAGES']:
             message = self.format_trend_message(signal_data, trend_icon, trend_text)
             self.send_telegram(message)
-            self.last_trend_notification = new_trend
-            self.logger.info(f"📊 إشعار اتجاه: {new_trend}")
+            self.last_trend_notifications[symbol] = new_trend
+            self.logger.info(f"إشعار اتجاه للرمز {symbol}: {new_trend}")
         
-        # إغلاق الصفقات إذا كان الإعداد مفعلاً
+        # إغلاق صفقات هذا الرمز فقط إذا تغير الاتجاه
         if self.config['RESET_TRADES_ON_TREND_CHANGE'] and trend_changed and self.active_trades:
             closed_count = 0
             for trade_id in list(self.active_trades.keys()):
-                if self.active_trades[trade_id]['status'] == 'OPEN':
-                    self.active_trades[trade_id].update({
+                trade = self.active_trades[trade_id]
+                # إغلاق صفقات هذا الرمز فقط
+                if trade['ticker'] == symbol and trade['status'] == 'OPEN':
+                    trade.update({
                         'exit_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                         'status': 'CLOSED',
                         'exit_signal': 'trend_change'
                     })
                     closed_count += 1
-            self.logger.info(f"🔄 إغلاق {closed_count} صفقة بسبب تغيير الاتجاه")
+            if closed_count > 0:
+                self.logger.info(f"إغلاق {closed_count} صفقة للرمز {symbol} بسبب تغيير الاتجاه")
         
         return True
     
     def handle_entry_signal(self, signal_data, signal_category):
-        """معالجة إشارات الدخول - تطلب إشارات مختلفة من نفس المجموعة"""
+        """معالجة إشارات الدخول - معدل للتحقق من اتجاه الرمز المحدد"""
+        symbol = signal_data['ticker']
+        
         # التحقق من الحد الأقصى للصفقات
         active_trades_count = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
         if active_trades_count >= self.config['MAX_OPEN_TRADES']:
-            self.logger.warning("⏹️  الحد الأقصى للصفقات مكتفي")
+            self.logger.warning("الحد الأقصى للصفقات مكتفي")
             return False
         
-        # التحقق من مطابقة الاتجاه إذا كان الإعداد مفعلاً
-        if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] and self.current_trend:
-            if (signal_category == 'entry_bullish' and self.current_trend != 'BULLISH') or \
-               (signal_category == 'entry_bearish' and self.current_trend != 'BEARISH'):
-                self.logger.warning("⏹️  الإشارة لا تتطابق مع الاتجاه الحالي")
+        # التحقق من مطابقة الاتجاه للرمز المحدد
+        symbol_trend = self.symbol_trends.get(symbol)
+        if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] and symbol_trend:
+            if (signal_category == 'entry_bullish' and symbol_trend != 'BULLISH') or \
+               (signal_category == 'entry_bearish' and symbol_trend != 'BEARISH'):
+                self.logger.warning(f"الإشارة لا تتطابق مع الاتجاه الحالي للرمز {symbol}")
                 return False
         
         # نظام التأكيد - يتطلب إشارات مختلفة من نفس المجموعة
@@ -390,7 +455,7 @@ class TradingSystem:
                 'unique_signals': set(),
                 'signals_data': [],
                 'created_at': datetime.now(),
-                'signal_category': signal_category  # تخزين نوع المجموعة
+                'signal_category': signal_category
             }
         
         # التحقق من أن الإشارة مختلفة ولم تُضاف من قبل
@@ -399,9 +464,9 @@ class TradingSystem:
             self.pending_signals[signal_key]['unique_signals'].add(signal_type_clean)
             self.pending_signals[signal_key]['signals_data'].append(signal_data)
             self.pending_signals[signal_key]['updated_at'] = datetime.now()
-            self.logger.info(f"📥 إشارة فريدة: {signal_data['signal_type']} للمجموعة {signal_category}")
+            self.logger.info(f"إشارة فريدة: {signal_data['signal_type']} للمجموعة {signal_category}")
         else:
-            self.logger.info(f"⏭️  تجاهل إشارة مكررة: {signal_data['signal_type']}")
+            self.logger.info(f"تجاهل إشارة مكررة: {signal_data['signal_type']}")
             return True  # نعود بنجاح لكن لا نضيف إشارة مكررة
         
         # التحقق من اكتمال التأكيد
@@ -410,7 +475,7 @@ class TradingSystem:
             return self.open_confirmed_trade(signal_key, signal_category)
         else:
             current_signals = list(self.pending_signals[signal_key]['unique_signals'])
-            self.logger.info(f"⏳ في انتظار التأكيد: {unique_count}/{self.config['REQUIRED_CONFIRMATIONS']} - الإشارات: {current_signals}")
+            self.logger.info(f"في انتظار التأكيد: {unique_count}/{self.config['REQUIRED_CONFIRMATIONS']} - الإشارات: {current_signals}")
             return True
     
     def clean_expired_signals(self):
@@ -422,7 +487,7 @@ class TradingSystem:
             time_diff = (current_time - signal_data['created_at']).total_seconds()
             if time_diff > self.config['CONFIRMATION_TIMEOUT']:
                 expired_keys.append(signal_key)
-                self.logger.info(f"🗑️  تنظيف إشارات منتهية: {signal_key}")
+                self.logger.info(f"تنظيف إشارات منتهية: {signal_key}")
         
         for key in expired_keys:
             del self.pending_signals[key]
@@ -433,7 +498,7 @@ class TradingSystem:
         
         # التأكد من أن لدينا إشارات كافية ومختلفة
         if len(pending_data['unique_signals']) < self.config['REQUIRED_CONFIRMATIONS']:
-            self.logger.error(f"❌ عدد الإشارات غير كافٍ: {len(pending_data['unique_signals'])}")
+            self.logger.error(f"عدد الإشارات غير كافٍ: {len(pending_data['unique_signals'])}")
             return False
         
         # استخدام أول إشارة كإشارة رئيسية
@@ -464,14 +529,14 @@ class TradingSystem:
         del self.pending_signals[signal_key]
         
         unique_signals_list = list(pending_data['unique_signals'])
-        self.logger.info(f"📈 فتح صفقة {direction} (#{trade_id}) بـ {trade_info['confirmation_count']} إشارات مختلفة: {unique_signals_list}")
+        self.logger.info(f"فتح صفقة {direction} (#{trade_id}) بـ {trade_info['confirmation_count']} إشارات مختلفة: {unique_signals_list}")
         return True
     
     def handle_exit_signal(self, signal_data):
         """معالجة إشارات الخروج"""
         trade = self.find_active_trade(signal_data['ticker'])
         if not trade:
-            self.logger.warning(f"⚠️  لا توجد صفقة نشطة للرمز {signal_data['ticker']}")
+            self.logger.warning(f"لا توجد صفقة نشطة للرمز {signal_data['ticker']}")
             return False
         
         # إغلاق الصفقة
@@ -486,7 +551,7 @@ class TradingSystem:
             message = self.format_exit_message(trade)
             self.send_telegram(message)
         
-        self.logger.info(f"📉 إغلاق صفقة #{trade['trade_id']}")
+        self.logger.info(f"إغلاق صفقة #{trade['trade_id']}")
         return True
     
     def handle_trend_confirmation(self, signal_data):
@@ -495,7 +560,7 @@ class TradingSystem:
             message = self.format_confirmation_message(signal_data)
             self.send_telegram(message)
         
-        self.logger.info(f"✅ تأكيد اتجاه: {signal_data['signal_type']}")
+        self.logger.info(f"تأكيد اتجاه: {signal_data['signal_type']}")
         return True
     
     def handle_general_signal(self, signal_data):
@@ -504,7 +569,7 @@ class TradingSystem:
             message = self.format_general_message(signal_data)
             self.send_telegram(message)
         
-        self.logger.info(f"🔔 إشارة عامة: {signal_data['signal_type']}")
+        self.logger.info(f"إشارة عامة: {signal_data['signal_type']}")
         return True
     
     def find_active_trade(self, ticker):
@@ -551,7 +616,7 @@ class TradingSystem:
             return False
             
         if not self.config['TELEGRAM_BOT_TOKEN'] or self.config['TELEGRAM_BOT_TOKEN'] == 'your_bot_token_here':
-            print(f"📲 محاكاة إرسال Telegram:\n{message}")
+            print(f"محاكاة إرسال Telegram:\n{message}")
             return True
         
         try:
@@ -565,13 +630,13 @@ class TradingSystem:
             success = response.status_code == 200
             
             if success:
-                self.logger.info("✅ تم إرسال الرسالة إلى Telegram")
+                self.logger.info("تم إرسال الرسالة إلى Telegram")
             else:
-                self.logger.error(f"❌ فشل إرسال Telegram: {response.status_code}")
+                self.logger.error(f"فشل إرسال Telegram: {response.status_code}")
             
             return success
         except Exception as e:
-            self.logger.error(f"❌ خطأ في إرسال Telegram: {e}")
+            self.logger.error(f"خطأ في إرسال Telegram: {e}")
             return False
     
     # 🔧 دوال تنسيق الرسائل
@@ -589,9 +654,13 @@ class TradingSystem:
         """.strip()
     
     def format_entry_message(self, trade_info, confirmation_data):
-        """تنسيق رسالة دخول الصفقة بالنموذج المطلوب"""
+        """تنسيق رسالة دخول الصفقة - معدل لعرض اتجاه الرمز المحدد"""
         ticker = trade_info['ticker']
         direction = trade_info['direction']
+        
+        # الحصول على اتجاه الرمز المحدد
+        symbol_trend = self.symbol_trends.get(ticker, 'غير محدد')
+        trend_match = symbol_trend == ('BULLISH' if direction == 'CALL' else 'BEARISH')
         
         if direction == 'CALL':
             direction_icon, direction_text = "🟢", "شراء"
@@ -629,13 +698,16 @@ class TradingSystem:
         # تنظيف اسم الإشارة الرئيسية
         main_signal_clean = main_signal.replace('+', '').replace('-', '')
         
+        # تحديد حالة محاذاة الاتجاه
+        alignment_status = "🟢 مطابق للاتجاه العام" if trend_match else "🟡 غير متطابق مع الاتجاه"
+        
         message = f"""
 ✦✦✦ 🚀 دخـــــول صفـــــقة ✦✦✦
 ┏━━━━━━━━━━━━━━━━━━━━
 ┃ 💰 الرمز: {ticker}
 ┃ 🎯 نوع الصفقة: {direction_icon} {direction_text}
-┃ 📊 الاتجاه الحالي: {trend_icon} {trend_text}
-┃ 🎯 محاذاة الاتجاه: 🟢 مطابق للاتجاه العام
+┃ 📊 اتجاه الرمز: {trend_icon} {symbol_trend if symbol_trend else 'غير محدد'}
+┃ 🎯 محاذاة الاتجاه: {alignment_status}
 ┃ 📋 الإشارة الرئيسية: {main_signal_clean} (تم التأكيد بـ {confirm_count} إشارات)
 ┃ 🔔 الإشارات المساعدة: {secondary_count} إشارة
 {secondary_listing}┃ 📊 الصفقات المفتوحة: {open_trades} من {max_open_trades}
@@ -668,9 +740,12 @@ class TradingSystem:
     
     def format_confirmation_message(self, signal_data):
         """تنسيق رسالة تأكيد الاتجاه"""
-        if 'bullish' in signal_data['signal_type'].lower() or self.current_trend == 'BULLISH':
+        # الحصول على اتجاه الرمز المحدد
+        symbol_trend = self.symbol_trends.get(signal_data['ticker'], 'غير محدد')
+        
+        if symbol_trend == 'BULLISH' or 'bullish' in signal_data['signal_type'].lower():
             trend_icon, trend_text = "🟢📈", "شراء (اتجاه صاعد)"
-        elif 'bearish' in signal_data['signal_type'].lower() or self.current_trend == 'BEARISH':
+        elif symbol_trend == 'BEARISH' or 'bearish' in signal_data['signal_type'].lower():
             trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
         else:
             trend_icon, trend_text = "⚪", "محايد"
@@ -704,7 +779,7 @@ class TradingSystem:
         """.strip()
     
     def get_system_status(self):
-        """الحصول على حالة النظام"""
+        """الحصول على حالة النظام - معدل لعرض اتجاهات جميع الرموز"""
         active_trades = [t for t in self.active_trades.values() if t['status'] == 'OPEN']
         
         return {
@@ -714,7 +789,8 @@ class TradingSystem:
             "active_trades": len(active_trades),
             "max_open_trades": self.config['MAX_OPEN_TRADES'],
             "pending_signals": len(self.pending_signals),
-            "current_trend": self.current_trend,
+            "symbol_trends": self.symbol_trends,  # ✅ عرض اتجاهات جميع الرموز
+            "trends_count": len(self.symbol_trends),
             "required_confirmations": self.config['REQUIRED_CONFIRMATIONS'],
             "telegram_enabled": self.config['TELEGRAM_ENABLED'],
             "message_controls": {
@@ -746,6 +822,7 @@ class TradingSystem:
         print(f"   🔔 إشعارات عامة: {'مفعّل' if self.config['SEND_GENERAL_MESSAGES'] else 'معطل'}")
         print(f"   📊 التأكيدات المطلوبة: {self.config['REQUIRED_CONFIRMATIONS']} إشارات مختلفة من نفس المجموعة")
         print(f"   📈 الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
+        print(f"   🎯 نظام اتجاه منفصل لكل رمز: مفعّل")
     
     def handle_test(self, request):
         """معالجة صفحة الاختبار"""
@@ -761,17 +838,43 @@ class TradingSystem:
                     .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
                     textarea { width: 100%; height: 100px; margin: 10px 0; padding: 10px; }
                     button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+                    .status { margin-top: 20px; padding: 15px; border-radius: 5px; }
+                    .success { background: #d4edda; color: #155724; }
+                    .error { background: #f8d7da; color: #721c24; }
                 </style>
             </head>
             <body>
                 <div class="container">
                     <h1>🧪 اختبار نظام إشارات التداول</h1>
+                    <p><strong>🎯 النظام يدعم الآن اتجاه منفصل لكل رمز</strong></p>
                     <form method="POST">
                         <textarea name="signal" placeholder="Ticker : BTCUSDT Signal : bullish_catcher Open : 0 Close : 0" required>Ticker : SPX500 Signal : Bearish New Imbalance Open : 0 Close : 0</textarea>
                         <br>
                         <button type="submit">إرسال الإشارة</button>
                     </form>
+                    <div>
+                        <h3>📊 اتجاهات الرموز الحالية:</h3>
+                        <pre id="trends"></pre>
+                    </div>
                 </div>
+                <script>
+                    // تحديث اتجاهات الرموز كل 5 ثوان
+                    function updateTrends() {
+                        fetch('/status')
+                            .then(response => response.json())
+                            .then(data => {
+                                const trends = data.symbol_trends || {};
+                                const trendsElement = document.getElementById('trends');
+                                if (Object.keys(trends).length === 0) {
+                                    trendsElement.innerHTML = 'لا توجد اتجاهات مسجلة';
+                                } else {
+                                    trendsElement.innerHTML = JSON.stringify(trends, null, 2);
+                                }
+                            });
+                    }
+                    setInterval(updateTrends, 5000);
+                    updateTrends();
+                </script>
             </body>
             </html>
             '''
@@ -781,7 +884,7 @@ class TradingSystem:
             
             if success:
                 return f'''
-                <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 5px;">
+                <div class="status success">
                     <h3>✅ تمت المعالجة بنجاح!</h3>
                     <p><strong>الإشارة:</strong> {signal}</p>
                 </div>
@@ -789,7 +892,7 @@ class TradingSystem:
                 '''
             else:
                 return f'''
-                <div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px;">
+                <div class="status error">
                     <h3>❌ فشل في المعالجة</h3>
                     <p><strong>الإشارة:</strong> {signal}</p>
                 </div>
@@ -798,7 +901,7 @@ class TradingSystem:
     
     def run(self):
         """تشغيل التطبيق"""
-        self.logger.info(f"🌐 بدء التشغيل على المنفذ {self.port}")
+        self.logger.info(f"بدء التشغيل على المنفذ {self.port}")
         self.app.run(host='0.0.0.0', port=self.port, debug=self.config['DEBUG'])
 
 # الحل: إنشاء النظام وتعيين app لكائن Flask
