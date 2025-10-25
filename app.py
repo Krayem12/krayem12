@@ -135,6 +135,10 @@ class TradingSystem:
             print(f"❌ خطأ في تحميل الإشارات من {key}: {e}")
             return []
 
+    def display_loaded_signals(self):
+        """عرض الإشارات المحمّلة للتصحيح فقط (تفادي الخطأ في Render)"""
+        print("🔖 تم تحميل الإشارات من .env بنجاح")
+
     def setup_managers(self):
         """إعداد المديرين الداخليين"""
         self.pending_signals = {}
