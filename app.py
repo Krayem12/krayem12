@@ -815,63 +815,42 @@ class TradingSystem:
             return False
 
     def send_to_external_server(self, message_text, message_type):
-        """إرسال نفس رسالة Telegram إلى الخادم الخارجي بدون توكن - نفس المحتوى"""
+        """إرسال نفس نص رسالة Telegram إلى الخادم الخارجي *حرفيًا* كـ RAW UTF-8
+        - بدون JSON
+        - بدون form-data
+        - بدون مفاتيح إضافية
+        - نفس النص تمامًا كما هو
+        """
         if not self.config['EXTERNAL_SERVER_ENABLED']:
             return False
         if not self.config['EXTERNAL_SERVER_URL'] or self.config['EXTERNAL_SERVER_URL'] == 'https://api.example.com/webhook/trading':
             return False
         try:
-            payloads = [
-                {
-                    'text': message_text,
-                    'message': message_text,
-                    'type': message_type,
-                    'timestamp': datetime.now().isoformat(),
-                    'signal_type': message_type.upper()
-                },
-                {
-                    'content': message_text,
-                    'category': message_type,
-                    'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                }
-            ]
-            headers = {'Content-Type': 'application/json'}
-            for i, payload in enumerate(payloads, 1):
+            # نرسل النص الخام مباشرةً في جسم الطلب
+            headers = {'Content-Type': 'text/plain; charset=utf-8'}
+            response = requests.post(
+                self.config['EXTERNAL_SERVER_URL'],
+                data=message_text.encode('utf-8'),
+                headers=headers,
+                timeout=10,
+                verify=False
+            )
+            if response.status_code in [200, 201, 204]:
+                print("✅ تم الإرسال كنص خام (text/plain) مطابق 1:1")
+                self.logger.info("تم إرسال الرسالة كنص خام إلى الخادم الخارجي")
+                return True
+            else:
+                print(f"❌ الخادم الخارجي أعاد كود: {response.status_code}")
                 try:
-                    print(f"🔗 محاولة الإرسال {i} إلى الخادم الخارجي...")
-                    response = requests.post(
-                        self.config['EXTERNAL_SERVER_URL'],
-                        json=payload,
-                        headers=headers,
-                        timeout=10,
-                        verify=False
-                    )
-                    if response.status_code in [200, 201, 204]:
-                        print(f"✅ تم الإرسال بنجاح إلى الخادم الخارجي (المحاولة {i})")
-                        self.logger.info(f"تم إرسال الرسالة إلى الخادم الخارجي: {message_type}")
-                        return True
-                    else:
-                        print(f"❌ فشل المحاولة {i}: {response.status_code}")
-                except Exception as e:
-                    print(f"❌ خطأ في المحاولة {i}: {e}")
-            print("🔄 محاولة الإرسال كـ form-data...")
-            try:
-                form_response = requests.post(
-                    self.config['EXTERNAL_SERVER_URL'],
-                    data={'message': message_text, 'type': message_type},
-                    timeout=10
-                )
-                if form_response.status_code in [200, 201, 204]:
-                    print("✅ تم الإرسال بنجاح باستخدام form-data!")
-                    return True
-            except Exception as form_error:
-                print(f"❌ فشل الإرسال كـ form-data: {form_error}")
-            return False
+                    print(f"📋 الاستجابة: {response.text[:200]}")
+                except Exception:
+                    pass
+                return False
         except Exception as e:
-            print(f"💥 فشل جميع محاولات الإرسال إلى الخادم الخارجي: {e}")
+            print(f"💥 فشل إرسال النص الخام إلى الخادم الخارجي: {e}")
             return False
 
-    def send_to_external_server_with_retry(self, message_text, message_type, max_retries=2):
+    def send_to_external_server_with_retry(self, message_text, message_type, max_retries=2):(self, message_text, message_type, max_retries=2):
         """إرسال مع إعادة المحاولة التلقائية"""
         for attempt in range(max_retries + 1):
             success = self.send_to_external_server(message_text, message_type)
