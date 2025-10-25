@@ -11,6 +11,7 @@ import re
 import requests
 import platform
 import sys
+import socket
 from datetime import datetime
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -200,6 +201,33 @@ class TradingSystem:
         
         self.logger.addHandler(stream_handler)
     
+    def diagnose_external_server(self):
+        """تشخيص مفصل لمشكلة الخادم الخارجي"""
+        print("\n🔍 تشخيص مفصل للخادم الخارجي:")
+        print(f"   📍 الرابط: {self.config['EXTERNAL_SERVER_URL']}")
+        
+        # فحص DNS
+        try:
+            domain = self.config['EXTERNAL_SERVER_URL'].split('//')[1].split('/')[0]
+            ip = socket.gethostbyname(domain)
+            print(f"   🌐 DNS يعمل: {domain} → {ip}")
+        except Exception as e:
+            print(f"   ❌ مشكلة في DNS: {e}")
+            return False
+        
+        # فحص الاتصال الأساسي
+        try:
+            test_url = self.config['EXTERNAL_SERVER_URL'].split('/sendMessage')[0]
+            response = requests.get(test_url, timeout=5, verify=False)
+            print(f"   📡 الاتصال الأساسي: ✅ ({response.status_code})")
+        except Exception as e:
+            print(f"   ❌ فشل الاتصال الأساسي: {e}")
+        
+        # فحص المسار المحدد
+        print(f"   🗺️  فحص المسار: /sendMessage")
+        
+        return True
+
     def check_settings(self):
         """فحص إعدادات Telegram والخادم الخارجي"""
         print("\n🔍 فحص إعدادات Telegram:")
@@ -226,8 +254,20 @@ class TradingSystem:
         # اختبار الاتصال بالخادم الخارجي
         if self.config['EXTERNAL_SERVER_ENABLED'] and self.config['EXTERNAL_SERVER_URL'] and self.config['EXTERNAL_SERVER_URL'] != 'https://api.example.com/webhook/trading':
             print("   🌐 اختبار الاتصال بالخادم الخارجي...")
+            
+            # تشخيص أولي
+            self.diagnose_external_server()
+            
+            # اختبار الاتصال
             test_result = self.test_external_server_connection()
             print(f"   حالة الاتصال: {'✅ نجح' if test_result else '❌ فشل'}")
+            
+            if not test_result:
+                print("   💡 اقتراح: تحقق من:")
+                print("      - أن الخادم يعمل وتقوم بالاستماع على المنفذ الصحيح")
+                print("      - أن رابط /sendMessage صحيح")
+                print("      - أن الخادم يقبل طلبات POST بدون توكن")
+                print("      - أن لا توجد قيود على الـ CORS أو الـ Firewall")
         else:
             print("   ⚠️  إعدادات الخادم الخارجي غير مكتملة")
 
@@ -242,35 +282,95 @@ class TradingSystem:
             return False
 
     def test_external_server_connection(self):
-        """اختبار الاتصال بالخادم الخارجي بدون توكن"""
+        """اختبار الاتصال بالخادم الخارجي بدون توكن - محسّن"""
         try:
-            # بناء بيانات اختبار بسيطة
-            test_payload = {
-                'text': '🔍 اختبار اتصال من نظام الإشارات',
-                'message': 'اختبار اتصال',
-                'type': 'test',
-                'timestamp': datetime.now().isoformat(),
-                'signal_type': 'TEST'
-            }
+            print("   🌐 اختبار الاتصال بالخادم الخارجي (محسّن)...")
+            
+            # تجربة عدة تنسيقات مختلفة للبيانات
+            test_payloads = [
+                # التنسيق 1: JSON بسيط
+                {
+                    'text': '🔍 اختبار اتصال من نظام الإشارات',
+                    'message': 'اختبار اتصال',
+                    'type': 'test',
+                    'timestamp': datetime.now().isoformat()
+                },
+                # التنسيق 2: مشابه لـ Telegram
+                {
+                    'chat_id': 'test',
+                    'text': '🔍 اختبار اتصال من نظام الإشارات',
+                    'parse_mode': 'HTML'
+                },
+                # التنسيق 3: بيانات بسيطة جداً
+                {
+                    'test': True,
+                    'message': 'اختبار اتصال'
+                }
+            ]
             
             headers = {'Content-Type': 'application/json'}
             
-            print("   🌐 اختبار الاتصال بالخادم الخارجي (بدون توكن)...")
-            response = requests.post(
-                self.config['EXTERNAL_SERVER_URL'],
-                json=test_payload,
-                headers=headers,
-                timeout=10
-            )
+            for i, payload in enumerate(test_payloads, 1):
+                print(f"   🧪 المحاولة {i}/3: {json.dumps(payload, ensure_ascii=False)[:50]}...")
+                
+                try:
+                    response = requests.post(
+                        self.config['EXTERNAL_SERVER_URL'],
+                        json=payload,
+                        headers=headers,
+                        timeout=8,
+                        verify=False  # إيقاف التحقق من SSL مؤقتاً
+                    )
+                    
+                    print(f"   📊 الاستجابة: {response.status_code}")
+                    
+                    if response.status_code in [200, 201]:
+                        print(f"   ✅ نجحت المحاولة {i}!")
+                        return True
+                    else:
+                        print(f"   ❌ فشلت المحاولة {i}: {response.status_code} - {response.text[:100]}")
+                        
+                except requests.exceptions.SSLError as ssl_error:
+                    print(f"   🔒 خطأ SSL في المحاولة {i}: {ssl_error}")
+                    # حاول بدون SSL
+                    try:
+                        response = requests.post(
+                            self.config['EXTERNAL_SERVER_URL'],
+                            json=payload,
+                            headers=headers,
+                            timeout=8,
+                            verify=False
+                        )
+                        if response.status_code in [200, 201]:
+                            print(f"   ✅ نجحت المحاولة {i} بدون SSL!")
+                            return True
+                    except Exception as retry_error:
+                        print(f"   ❌ فشل إعادة المحاولة {i}: {retry_error}")
+                        
+                except requests.exceptions.ConnectionError as conn_error:
+                    print(f"   🔌 خطأ اتصال في المحاولة {i}: {conn_error}")
+                except requests.exceptions.Timeout as timeout_error:
+                    print(f"   ⏰ انتهت المهلة في المحاولة {i}: {timeout_error}")
+                except Exception as e:
+                    print(f"   ❌ خطأ غير متوقع في المحاولة {i}: {e}")
             
-            print(f"   📊 حالة الاختبار: {response.status_code}")
-            if response.status_code != 200:
-                print(f"   📋 رد الخادم: {response.text}")
+            # إذا فشلت جميع المحاولات، جرب GET
+            print("   🔄 محاولة طلب GET...")
+            try:
+                get_response = requests.get(
+                    self.config['EXTERNAL_SERVER_URL'].replace('/sendMessage', ''),
+                    timeout=5
+                )
+                print(f"   📊 استجابة GET: {get_response.status_code}")
+                if get_response.status_code == 200:
+                    print("   ⚠️  الخادم يعمل ولكن المسار قد يكون خاطئاً")
+            except Exception as get_error:
+                print(f"   ❌ فشل طلب GET: {get_error}")
             
-            return response.status_code in [200, 201]
+            return False
             
         except Exception as e:
-            print(f"   ❌ فشل اختبار الاتصال: {e}")
+            print(f"   💥 فشل اختبار الاتصال تماماً: {e}")
             return False
 
     def setup_routes(self):
@@ -504,7 +604,7 @@ class TradingSystem:
                 self.send_telegram(message)
             
             # إرسال نفس الرسالة إلى الخادم الخارجي
-            self.send_to_external_server(message, 'trend')
+            self.send_to_external_server_with_retry(message, 'trend')
             
             self.last_trend_notifications[symbol] = new_trend
             self.logger.info(f"إشعار اتجاه للرمز {symbol}: {new_trend}")
@@ -631,7 +731,7 @@ class TradingSystem:
             self.send_telegram(message)
         
         # إرسال نفس الرسالة إلى الخادم الخارجي
-        self.send_to_external_server(message, 'entry')
+        self.send_to_external_server_with_retry(message, 'entry')
         
         # تنظيف الإشارات المعلقة
         del self.pending_signals[signal_key]
@@ -662,7 +762,7 @@ class TradingSystem:
             self.send_telegram(message)
         
         # إرسال نفس الرسالة إلى الخادم الخارجي
-        self.send_to_external_server(message, 'exit')
+        self.send_to_external_server_with_retry(message, 'exit')
         
         self.logger.info(f"إغلاق صفقة #{trade['trade_id']}")
         return True
@@ -676,7 +776,7 @@ class TradingSystem:
             self.send_telegram(message)
         
         # إرسال نفس الرسالة إلى الخادم الخارجي
-        self.send_to_external_server(message, 'trend_confirmation')
+        self.send_to_external_server_with_retry(message, 'trend_confirmation')
         
         self.logger.info(f"تأكيد اتجاه: {signal_data['signal_type']}")
         return True
@@ -690,7 +790,7 @@ class TradingSystem:
             self.send_telegram(message)
         
         # إرسال نفس الرسالة إلى الخادم الخارجي
-        self.send_to_external_server(message, 'general')
+        self.send_to_external_server_with_retry(message, 'general')
         
         self.logger.info(f"إشارة عامة: {signal_data['signal_type']}")
         return True
@@ -788,73 +888,89 @@ class TradingSystem:
             return False
 
     def send_to_external_server(self, message_text, message_type):
-        """إرسال نفس رسالة Telegram إلى الخادم الخارجي بدون توكن"""
+        """إرسال نفس رسالة Telegram إلى الخادم الخارجي بدون توكن - محسّن"""
         if not self.config['EXTERNAL_SERVER_ENABLED']:
-            print("🔕 الخادم الخارجي معطل")
             return False
         
         if not self.config['EXTERNAL_SERVER_URL'] or self.config['EXTERNAL_SERVER_URL'] == 'https://api.example.com/webhook/trading':
-            print("❌ رابط الخادم الخارجي غير مضبوط")
             return False
         
         try:
-            # بناء الـ payload بشكل أبسط
-            payload = {
-                'text': message_text,  # قد يتوقع الخادم حقل 'text' بدلاً من 'message'
-                'message': message_text,
-                'type': message_type,
-                'timestamp': datetime.now().isoformat(),
-                'signal_type': message_type.upper()
-            }
+            # تجربة تنسيقات متعددة
+            payloads = [
+                # التنسيق الأساسي
+                {
+                    'text': message_text,
+                    'message': message_text,
+                    'type': message_type,
+                    'timestamp': datetime.now().isoformat(),
+                    'signal_type': message_type.upper()
+                },
+                # تنسيق بديل
+                {
+                    'content': message_text,
+                    'category': message_type,
+                    'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+            ]
             
-            headers = {
-                'Content-Type': 'application/json',
-                'User-Agent': f'{self.config["APP_NAME"]}/{self.config["APP_VERSION"]}'
-            }
+            headers = {'Content-Type': 'application/json'}
             
-            print(f"🔗 إرسال إلى الخادم الخارجي (بدون توكن)...")
-            print(f"📤 الرابط: {self.config['EXTERNAL_SERVER_URL']}")
-            print(f"📝 نوع الرسالة: {message_type}")
-            print(f"📦 البيانات المرسلة: {json.dumps(payload, ensure_ascii=False)[:150]}...")
-            
-            # إرسال الطلب
-            response = requests.post(
-                self.config['EXTERNAL_SERVER_URL'],
-                json=payload,
-                headers=headers,
-                timeout=10
-            )
-            
-            success = response.status_code in [200, 201, 204]
-            
-            if success:
-                print(f"✅ تم الإرسال بنجاح إلى الخادم الخارجي: {response.status_code}")
-                self.logger.info(f"تم إرسال الرسالة إلى الخادم الخارجي: {message_type}")
-                return True
-            else:
-                print(f"❌ فشل الإرسال: {response.status_code}")
-                print(f"📋 تفاصيل الخطأ: {response.text}")
-                
-                # محاولة بديلة: إرسال كبيانات form
+            for i, payload in enumerate(payloads, 1):
                 try:
-                    print("🔄 محاولة بديلة بإرسال كـ form-data...")
-                    form_response = requests.post(
+                    print(f"🔗 محاولة الإرسال {i} إلى الخادم الخارجي...")
+                    
+                    response = requests.post(
                         self.config['EXTERNAL_SERVER_URL'],
-                        data={'message': message_text, 'type': message_type},
-                        timeout=10
+                        json=payload,
+                        headers=headers,
+                        timeout=10,
+                        verify=False
                     )
-                    if form_response.status_code in [200, 201, 204]:
-                        print("✅ النجاح بالطريقة البديلة!")
+                    
+                    if response.status_code in [200, 201, 204]:
+                        print(f"✅ تم الإرسال بنجاح إلى الخادم الخارجي (المحاولة {i})")
+                        self.logger.info(f"تم إرسال الرسالة إلى الخادم الخارجي: {message_type}")
                         return True
-                except Exception as form_e:
-                    print(f"❌ فشل الطريقة البديلة: {form_e}")
-                
-                return False
+                    else:
+                        print(f"❌ فشل المحاولة {i}: {response.status_code}")
+                        
+                except Exception as e:
+                    print(f"❌ خطأ في المحاولة {i}: {e}")
+            
+            # إذا فشلت جميع المحاولات، جرب إرسال كـ form data
+            print("🔄 محاولة الإرسال كـ form-data...")
+            try:
+                form_response = requests.post(
+                    self.config['EXTERNAL_SERVER_URL'],
+                    data={'message': message_text, 'type': message_type},
+                    timeout=10
+                )
+                if form_response.status_code in [200, 201, 204]:
+                    print("✅ تم الإرسال بنجاح باستخدام form-data!")
+                    return True
+            except Exception as form_error:
+                print(f"❌ فشل الإرسال كـ form-data: {form_error}")
+            
+            return False
             
         except Exception as e:
-            print(f"❌ خطأ في إرسال إلى الخادم الخارجي: {e}")
-            self.logger.error(f"خطأ في إرسال إلى الخادم الخارجي: {e}")
+            print(f"💥 فشل جميع محاولات الإرسال إلى الخادم الخارجي: {e}")
             return False
+
+    def send_to_external_server_with_retry(self, message_text, message_type, max_retries=2):
+        """إرسال مع إعادة المحاولة التلقائية"""
+        for attempt in range(max_retries + 1):
+            success = self.send_to_external_server(message_text, message_type)
+            if success:
+                return True
+            elif attempt < max_retries:
+                wait_time = 2 ** attempt  # exponential backoff
+                print(f"🔄 إعادة المحاولة بعد {wait_time} ثواني... ({attempt + 1}/{max_retries})")
+                import time
+                time.sleep(wait_time)
+        
+        return False
     
     # 🔧 دوال تنسيق الرسائل
     def format_trend_message(self, signal_data, trend_icon, trend_text):
@@ -1017,7 +1133,7 @@ class TradingSystem:
                 "SEND_EXIT_MESSAGES": self.config['SEND_EXIT_MESSAGES'],
                 "SEND_CONFIRMATION_MESSAGES": self.config['SEND_CONFIRMATION_MESSAGES'],
                 "SEND_GENERAL_MESSAGES": self.config['SEND_GENERAL_MESSAGES'],
-                "SEND_BULLISH_SIGNALS": self.config['SEND_BULLISH_SIGNALS'],
+                "SEND_BULLISH_SIGNALS': self.config['SEND_BULLISH_SIGNALS'],
                 "SEND_BEARISH_SIGNALS": self.config['SEND_BEARISH_SIGNALS']
             },
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
