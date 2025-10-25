@@ -827,7 +827,7 @@ class TradingSystem:
         try:
             response = requests.post(
                 self.config['EXTERNAL_SERVER_URL'],
-                data={"message": message_text},
+                files={"message": (None, message_text)},
                 timeout=10
             )
             if response.status_code in [200, 201, 204]:
