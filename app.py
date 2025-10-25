@@ -221,7 +221,7 @@ class TradingSystem:
         print("\n🔍 فحص إعدادات الخادم الخارجي:")
         print(f"   EXTERNAL_SERVER_ENABLED: {self.config['EXTERNAL_SERVER_ENABLED']}")
         print(f"   EXTERNAL_SERVER_URL: {self.config['EXTERNAL_SERVER_URL']}")
-        print(f"   EXTERNAL_SERVER_TOKEN: {'****' + self.config['EXTERNAL_SERVER_TOKEN'][-4:] if self.config['EXTERNAL_SERVER_TOKEN'] and self.config['EXTERNAL_SERVER_TOKEN'] != 'your_external_server_token_here' else 'غير مضبوط'}")
+        print(f"   EXTERNAL_SERVER_TOKEN: {'مضبوط' if self.config['EXTERNAL_SERVER_TOKEN'] and self.config['EXTERNAL_SERVER_TOKEN'] != 'your_external_server_token_here' else 'غير مضبوط'}")
         
         # اختبار الاتصال بالخادم الخارجي
         if self.config['EXTERNAL_SERVER_ENABLED'] and self.config['EXTERNAL_SERVER_URL'] and self.config['EXTERNAL_SERVER_URL'] != 'https://api.example.com/webhook/trading':
@@ -242,19 +242,20 @@ class TradingSystem:
             return False
 
     def test_external_server_connection(self):
-        """اختبار الاتصال بالخادم الخارجي"""
+        """اختبار الاتصال بالخادم الخارجي بدون توكن"""
         try:
-            headers = {'Content-Type': 'application/json'}
-            if self.config['EXTERNAL_SERVER_TOKEN'] and self.config['EXTERNAL_SERVER_TOKEN'] != 'your_external_server_token_here':
-                headers['Authorization'] = f"Bearer {self.config['EXTERNAL_SERVER_TOKEN']}"
-            
-            # إرسال طلب اختبار
+            # بناء بيانات اختبار بسيطة
             test_payload = {
-                'test': True,
-                'message': 'اتصال اختبار من نظام الإشارات',
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'text': '🔍 اختبار اتصال من نظام الإشارات',
+                'message': 'اختبار اتصال',
+                'type': 'test',
+                'timestamp': datetime.now().isoformat(),
+                'signal_type': 'TEST'
             }
             
+            headers = {'Content-Type': 'application/json'}
+            
+            print("   🌐 اختبار الاتصال بالخادم الخارجي (بدون توكن)...")
             response = requests.post(
                 self.config['EXTERNAL_SERVER_URL'],
                 json=test_payload,
@@ -262,9 +263,14 @@ class TradingSystem:
                 timeout=10
             )
             
+            print(f"   📊 حالة الاختبار: {response.status_code}")
+            if response.status_code != 200:
+                print(f"   📋 رد الخادم: {response.text}")
+            
             return response.status_code in [200, 201]
+            
         except Exception as e:
-            print(f"   ❌ خطأ في اختبار الاتصال بالخادم الخارجي: {e}")
+            print(f"   ❌ فشل اختبار الاتصال: {e}")
             return False
 
     def setup_routes(self):
@@ -422,21 +428,38 @@ class TradingSystem:
         return None
     
     def classify_signal(self, signal_data):
-        """تصنيف الإشارة"""
+        """تصنيف الإشارة مع تحسين المطابقة الجزئية"""
         signal_type = self.clean_signal_type(signal_data['signal_type'])
         signal_data['signal_type'] = signal_type  # تحديث بالنظيف
         
-        # البحث في القوائم
+        # البحث الدقيق أولاً
         for category, signals in self.signals.items():
             if signal_type in signals:
                 return category
         
-        # المطابقة الجزئية
+        # المطابقة الجزئية المحسنة
         for category, signals in self.signals.items():
             for signal in signals:
-                if signal.lower() in signal_type.lower() or signal_type.lower() in signal.lower():
-                    self.logger.info(f"مطابقة جزئية: {signal_type} -> {signal}")
+                # مطابقة أسهل - إزالة الحساسية للنصوص
+                clean_signal = signal.lower().replace('_', ' ').replace('-', ' ')
+                clean_type = signal_type.lower().replace('_', ' ').replace('-', ' ')
+                
+                if (clean_signal in clean_type or 
+                    clean_type in clean_signal or
+                    any(word in clean_type for word in clean_signal.split()) or
+                    any(word in clean_signal for word in clean_type.split())):
+                    self.logger.info(f"مطابقة جزئية محسنة: {signal_type} -> {signal}")
                     return category
+        
+        # إذا فشل كل شيء، حاول التخمين من الاسم
+        if 'bearish' in signal_type.lower():
+            return 'entry_bearish'
+        elif 'bullish' in signal_type.lower():
+            return 'entry_bullish'
+        elif 'trend' in signal_type.lower():
+            return 'trend'
+        elif 'exit' in signal_type.lower():
+            return 'exit'
         
         return 'unknown'
     
@@ -765,8 +788,9 @@ class TradingSystem:
             return False
 
     def send_to_external_server(self, message_text, message_type):
-        """إرسال نفس رسالة Telegram إلى الخادم الخارجي"""
+        """إرسال نفس رسالة Telegram إلى الخادم الخارجي بدون توكن"""
         if not self.config['EXTERNAL_SERVER_ENABLED']:
+            print("🔕 الخادم الخارجي معطل")
             return False
         
         if not self.config['EXTERNAL_SERVER_URL'] or self.config['EXTERNAL_SERVER_URL'] == 'https://api.example.com/webhook/trading':
@@ -774,23 +798,26 @@ class TradingSystem:
             return False
         
         try:
-            # إرسال نفس الرسالة النصية بالضبط التي نرسلها لـ Telegram
+            # بناء الـ payload بشكل أبسط
             payload = {
-                'message': message_text,  # نفس الرسالة النصية
-                'message_type': message_type,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'system_info': {
-                    'app_name': self.config['APP_NAME'],
-                    'app_version': self.config['APP_VERSION']
-                }
+                'text': message_text,  # قد يتوقع الخادم حقل 'text' بدلاً من 'message'
+                'message': message_text,
+                'type': message_type,
+                'timestamp': datetime.now().isoformat(),
+                'signal_type': message_type.upper()
             }
             
-            headers = {'Content-Type': 'application/json'}
+            headers = {
+                'Content-Type': 'application/json',
+                'User-Agent': f'{self.config["APP_NAME"]}/{self.config["APP_VERSION"]}'
+            }
             
-            print(f"🔗 محاولة الإرسال إلى الخادم الخارجي: {self.config['EXTERNAL_SERVER_URL']}")
-            print(f"📤 نوع الرسالة: {message_type}")
-            print(f"📝 محتوى الرسالة: {message_text[:100]}...")  # عرض جزء من الرسالة
+            print(f"🔗 إرسال إلى الخادم الخارجي (بدون توكن)...")
+            print(f"📤 الرابط: {self.config['EXTERNAL_SERVER_URL']}")
+            print(f"📝 نوع الرسالة: {message_type}")
+            print(f"📦 البيانات المرسلة: {json.dumps(payload, ensure_ascii=False)[:150]}...")
             
+            # إرسال الطلب
             response = requests.post(
                 self.config['EXTERNAL_SERVER_URL'],
                 json=payload,
@@ -798,17 +825,31 @@ class TradingSystem:
                 timeout=10
             )
             
-            success = response.status_code in [200, 201]
+            success = response.status_code in [200, 201, 204]
             
             if success:
-                print(f"✅ تم إرسال الرسالة إلى الخادم الخارجي بنجاح: {response.status_code}")
+                print(f"✅ تم الإرسال بنجاح إلى الخادم الخارجي: {response.status_code}")
                 self.logger.info(f"تم إرسال الرسالة إلى الخادم الخارجي: {message_type}")
+                return True
             else:
-                print(f"❌ فشل إرسال إلى الخادم الخارجي: {response.status_code}")
+                print(f"❌ فشل الإرسال: {response.status_code}")
                 print(f"📋 تفاصيل الخطأ: {response.text}")
-                self.logger.error(f"فشل إرسال إلى الخادم الخارجي: {response.status_code} - {response.text}")
-            
-            return success
+                
+                # محاولة بديلة: إرسال كبيانات form
+                try:
+                    print("🔄 محاولة بديلة بإرسال كـ form-data...")
+                    form_response = requests.post(
+                        self.config['EXTERNAL_SERVER_URL'],
+                        data={'message': message_text, 'type': message_type},
+                        timeout=10
+                    )
+                    if form_response.status_code in [200, 201, 204]:
+                        print("✅ النجاح بالطريقة البديلة!")
+                        return True
+                except Exception as form_e:
+                    print(f"❌ فشل الطريقة البديلة: {form_e}")
+                
+                return False
             
         except Exception as e:
             print(f"❌ خطأ في إرسال إلى الخادم الخارجي: {e}")
