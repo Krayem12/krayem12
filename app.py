@@ -3,10 +3,9 @@
 """
 AbuRayan_Bot_V8.3_Full.py
 نظام معالجة إشارات التداول - ملف واحد
-- يحافظ على نفس قوالب رسائل Telegram
-- يرسل للخادم الخارجي نص خام text/plain (مطابقة 1:1) بدون message=
-- منع الأخطاء السابقة (علامات اقتباس/دوال مكررة/كود مقطوع)
-- نافذة تأكيد للإشارات مع عدم فتح أكثر من صفقة للرمز
+- إصلاح خلط إشارات الاتجاه مع إشارات الدخول
+- تحسين تصنيف إشارات catcher كإشارات اتجاه
+- منع معالجة إشارات الاتجاه كإشارات دخول
 """
 
 import os
@@ -105,11 +104,19 @@ class TradingSystem:
                 self.normalized_index[ns] = category
 
     def _load_signal_list(self, key):
-        """تحميل قائمة الإشارات من .env مع معالجة الأقواس"""
+        """تحسين تحميل الإشارات مع معالجة خاصة لـ catcher"""
         try:
             signal_str = config(key, default='')
             if not signal_str:
                 return []
+            
+            # معالجة خاصة للإشارات التي تحتوي على catcher
+            if 'catcher' in signal_str.lower():
+                signals = [s.strip() for s in signal_str.split(',') if s.strip()]
+                print(f"✅ [تحميل] إشارات catcher في {key}: {signals}")
+                return signals
+            
+            # المعالجة الأصلية للإشارات الأخرى
             signals, current, inside = [], "", False
             for ch in signal_str:
                 if ch == '(':
@@ -132,7 +139,17 @@ class TradingSystem:
             return []
 
     def display_loaded_signals(self):
-        print("🔖 تم تحميل الإشارات من .env (إن وجدت)")
+        """عرض تفصيلي للإشارات المحملة"""
+        print("\n🔖 الإشارات المحملة من .env:")
+        for category, signals in self.signals.items():
+            print(f"   📁 {category}:")
+            for i, signal in enumerate(signals, 1):
+                normalized = self._normalize_signal_name(signal)
+                print(f"      {i}. {signal} -> '{normalized}'")
+        
+        print("\n🔖 الفهرس السريع:")
+        for signal, category in self.normalized_index.items():
+            print(f"   📍 '{signal}' -> {category}")
 
     def setup_managers(self):
         self.pending_signals = {}          # تأكيد الدخول
@@ -314,6 +331,7 @@ class TradingSystem:
             if data:
                 return self.convert_json_to_signal(data)
         raw = request.get_data(as_text=True)
+        print(f"📥 [RAW] إشارة خام مستلمة: {repr(raw)}")
         return raw.strip() if raw else ''
 
     def convert_json_to_signal(self, data):
@@ -378,6 +396,7 @@ class TradingSystem:
             return {
                 'ticker': ticker.strip(),
                 'signal_type': signal_type.strip(),
+                'original_signal': signal_type.strip(),  # حفظ الإشارة الأصلية
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'source': 'TradingView'
             }
@@ -392,46 +411,67 @@ class TradingSystem:
         return re.sub(r'\s+', ' ', name.replace('_', ' ').replace('-', ' ').strip().lower())
 
     def clean_signal_type(self, signal_type):
+        """تنظيف محسن يحافظ على هوية إشارات catcher"""
+        # الحفاظ على catcher كما هو
+        if 'catcher' in signal_type.lower():
+            return signal_type.strip()
+        
+        # التنظيف العادي للإشارات الأخرى
         cleaned = re.sub(r'\[.*?\]|\(.*?\)|\d+\.?\d*', '', signal_type)
         cleaned = ' '.join(cleaned.split()).strip()
         return cleaned
 
     def classify_signal(self, signal_data):
-        """تصنيف سريع مع فهرس + قواعد عامة"""
+        """تصنيف دقيق مع إعطاء أولوية لإشارات الاتجاه"""
         signal_type = self.clean_signal_type(signal_data['signal_type'])
+        original_signal = signal_data.get('original_signal', signal_type)
         signal_data['signal_type'] = signal_type
+        signal_data['original_signal'] = original_signal
+        
         ns = self._normalize_signal_name(signal_type)
+        
+        # 🔥 الأولوية لإشارات الاتجاه من .env
         if ns in self.normalized_index:
-            return self.normalized_index[ns]
+            category = self.normalized_index[ns]
+            print(f"✅ [تصنيف] إشارة '{signal_type}' -> '{category}' (من الفهرس)")
+            return category
 
+        # 🔥 قواعد احتياطية مع تحسين catcher
         ls = ns
-        if 'exit' in ls or 'close' in ls or 'tp' in ls or 'sl' in ls:
-            return 'exit'
-        if 'trend' in ls:
+        if 'bullish_catcher' in ls:
             return 'trend'
-        if 'tracer' in ls and ('bullish' in ls or 'bearish' in ls):
+        if 'bearish_catcher' in ls:
+            return 'trend'
+        if 'bullish_tracer' in ls or 'bearish_tracer' in ls:
             return 'trend_confirm'
+        if 'exit' in ls or 'close' in ls:
+            return 'exit'
         if 'bearish' in ls:
             return 'entry_bearish'
         if 'bullish' in ls:
             return 'entry_bullish'
+        
         return 'general'
 
     # =============================
     # معالجات حسب الفئة
     # =============================
     def handle_trend_signal(self, signal_data):
-        """تحديث اتجاه الرمز وإرسال رسالة اتجاه عام"""
+        """معالجة محسنة لإشارات الاتجاه"""
         symbol = signal_data['ticker']
-        s = signal_data['signal_type'].lower()
+        original_signal = signal_data.get('original_signal', signal_data['signal_type'])
+        s = original_signal.lower()
+        
+        print(f"🎯 [اتجاه] معالجة إشارة اتجاه: {original_signal} للرمز {symbol}")
 
-        if 'bullish' in s:
+        if 'bullish_catcher' in s or 'bullish_trend' in s:
             new_trend = 'BULLISH'
             trend_icon, trend_text = "🟢📈", "شراء (اتجاه صاعد)"
-        elif 'bearish' in s:
+        elif 'bearish_catcher' in s or 'bearish_trend' in s:
             new_trend = 'BEARISH'
             trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
         else:
+            print(f"❌ [اتجاه] إشارة اتجاه غير معروفة: {original_signal}")
             return False
 
         current = self.symbol_trends.get(symbol)
@@ -498,7 +538,14 @@ class TradingSystem:
         return True
 
     def handle_entry_signal(self, signal_data, signal_category):
-        """فتح صفقة بعد تأكيد عدد إشارات كافٍ"""
+        """منع معالجة إشارات الاتجاه كإشارات دخول"""
+        original_signal = signal_data.get('original_signal', signal_data['signal_type'])
+        
+        # 🔥 منع معالجة إشارات catcher كإشارات دخول
+        if 'catcher' in original_signal.lower():
+            print(f"🚫 [دخول] تجاهل إشارة اتجاه كإشارة دخول: {original_signal}")
+            return False
+        
         symbol = signal_data['ticker']
 
         # لا أكثر من صفقة للرمز
