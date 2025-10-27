@@ -5,7 +5,7 @@ AbuRayan_Bot_V8.3_Full.py
 نظام معالجة إشارات التداول - ملف واحد
 - التعرف فقط على الإشارات المحددة في .env
 - منع فتح الصفقات ضد الاتجاه بشكل صارم
-- تجاهل أي إشارة غير موجودة في الفهرس
+- منع إرسال رسائل الاتجاه المكررة إلا عند تغيير الاتجاه
 """
 
 import os
@@ -43,6 +43,7 @@ class TradingSystem:
         print(f"📊 الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
         print(f"🎯 نظام اتجاه منفصل لكل رمز: مفعّل")
         print(f"🔒 منع الصفقات ضد الاتجاه: {'مفعّل' if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] else 'معطل'}")
+        print(f"🔕 منع رسائل الاتجاه المكررة: مفعّل")
 
     # =============================
     # الإعدادات والتهيئة
@@ -156,8 +157,8 @@ class TradingSystem:
         self.pending_signals = {}          # تأكيد الدخول
         self.active_trades = {}            # الصفقات المفتوحة
         self.symbol_trends = {}            # اتجاه لكل رمز
-        self.last_trend_notifications = {} # آخر نص
-        self.last_trend_notified_at = {}   # آخر وقت
+        self.last_trend_notifications = {} # آخر اتجاه تم الإشعار عنه
+        self.last_trend_notified_at = {}   # آخر وقت تم الإشعار فيه
 
     def setup_flask(self):
         self.app = Flask(__name__)
@@ -300,7 +301,8 @@ class TradingSystem:
             "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "open_trades": len([t for t in self.active_trades.values() if t['status'] == 'OPEN']),
             "pending_groups": len(self.pending_signals),
-            "trends": self.symbol_trends
+            "trends": self.symbol_trends,
+            "last_notifications": self.last_trend_notifications
         }
 
     # =============================
@@ -477,7 +479,7 @@ class TradingSystem:
     # معالجات حسب الفئة
     # =============================
     def handle_trend_signal(self, signal_data):
-        """معالجة محسنة لإشارات الاتجاه"""
+        """معالجة محسنة لإشارات الاتجاه مع منع الإرسال المكرر"""
         symbol = signal_data['ticker']
         original_signal = signal_data.get('original_signal', signal_data['signal_type'])
         s = original_signal.lower()
@@ -494,27 +496,59 @@ class TradingSystem:
             print(f"❌ [اتجاه] إشارة اتجاه غير معروفة: {original_signal}")
             return False
 
-        current = self.symbol_trends.get(symbol)
-        changed = current != new_trend
+        current_trend = self.symbol_trends.get(symbol)
+        last_notified_trend = self.last_trend_notifications.get(symbol)
+        
+        # 🔥 تحديث اتجاه الرمز دائماً
         self.symbol_trends[symbol] = new_trend
+        
+        # 🔥 التحقق إذا كان الاتجاه قد تغير
+        changed = current_trend != new_trend
+        
+        # 🔥 التحقق إذا كان هذا نفس الاتجاه الذي تم الإشعار عنه مسبقاً
+        same_as_last_notification = last_notified_trend == new_trend
+        
+        print(f"🔍 [اتجاه] {symbol}: الحالي={current_trend}, الجديد={new_trend}, تغيير={changed}")
+        print(f"🔍 [إشعار] آخر إشعار={last_notified_trend}, نفس الإشعار={same_as_last_notification}")
 
-        # منع الإزعاج
-        notify = False
-        last = self.last_trend_notified_at.get(symbol)
+        # 🔥 إرسال الإشعار فقط إذا تغير الاتجاه أو لم يتم الإشعار مسبقاً
+        should_notify = False
+        
         if changed:
-            notify = True
+            should_notify = True
+            print(f"🔄 [اتجاه] تغيير اتجاه {symbol}: {current_trend} -> {new_trend}")
+        elif last_notified_trend is None:
+            should_notify = True
+            print(f"📢 [اتجاه] أول إشعار لاتجاه {symbol}: {new_trend}")
         else:
-            if not last or (datetime.now() - last).total_seconds() > 60:
-                notify = True
+            print(f"🔕 [اتجاه] تجاهل إشعار مكرر لـ {symbol}: {new_trend}")
 
-        if notify:
+        if should_notify:
             msg = self.format_trend_message(signal_data, trend_icon, trend_text)
+            
+            # إرسال لتيليجرام إذا كان مفعلاً
             if self.should_send_message('trend', signal_data):
-                self.send_telegram(msg)
-            self.send_to_external_server_with_retry(msg, 'trend')
+                telegram_sent = self.send_telegram(msg)
+                if telegram_sent:
+                    print(f"✅ [Telegram] تم إرسال إشعار اتجاه {symbol}: {new_trend}")
+                else:
+                    print(f"❌ [Telegram] فشل إرسال إشعار اتجاه {symbol}")
+            else:
+                print(f"🔕 [Telegram] إرسال رسائل الاتجاه معطل")
+            
+            # إرسال للخادم الخارجي
+            external_sent = self.send_to_external_server_with_retry(msg, 'trend')
+            if external_sent:
+                print(f"✅ [الخادم] تم إرسال إشعار اتجاه {symbol}: {new_trend}")
+            else:
+                print(f"❌ [الخادم] فشل إرسال إشعار اتجاه {symbol}")
+            
+            # تحديث آخر إشعار
             self.last_trend_notifications[symbol] = new_trend
             self.last_trend_notified_at[symbol] = datetime.now()
-            self.logger.info(f"إشعار اتجاه {symbol}: {new_trend}")
+            self.logger.info(f"إشعار اتجاه {symbol}: {new_trend} (تغيير: {changed})")
+        else:
+            print(f"🔕 [اتجاه] لا حاجة للإشعار - نفس الاتجاه {new_trend} للرمز {symbol}")
 
         # إغلاق صفقات الرمز فقط عند تغيير الاتجاه (اختياري)
         if self.config['RESET_TRADES_ON_TREND_CHANGE'] and changed:
@@ -530,6 +564,7 @@ class TradingSystem:
                     closed += 1
             if closed:
                 self.logger.info(f"إغلاق {closed} صفقة للرمز {symbol} بسبب تغيير الاتجاه")
+        
         return True
 
     def handle_trend_confirmation(self, signal_data):
