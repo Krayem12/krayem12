@@ -3,9 +3,8 @@
 """
 AbuRayan_Bot_V8.3_Full.py
 نظام معالجة إشارات التداول - ملف واحد
-- إصلاح خلط إشارات الاتجاه مع إشارات الدخول
-- تحسين تصنيف إشارات catcher كإشارات اتجاه
-- منع معالجة إشارات الاتجاه كإشارات دخول
+- التعرف فقط على الإشارات المحددة في .env
+- تجاهل أي إشارة غير موجودة في الفهرس
 """
 
 import os
@@ -353,6 +352,8 @@ class TradingSystem:
         signal_data['category'] = category
         self.logger.info(f"إشارة مصنفة: {signal_data['signal_type']} -> {category}")
 
+        if category == 'unknown':
+            return self.handle_unknown_signal(signal_data)
         if category == 'trend':
             return self.handle_trend_signal(signal_data)
         if category == 'trend_confirm':
@@ -427,18 +428,15 @@ class TradingSystem:
         return re.sub(r'\s+', ' ', name.replace('_', ' ').replace('-', ' ').strip().lower())
 
     def clean_signal_type(self, signal_type):
-        """تنظيف محسن يحافظ على هوية إشارات catcher"""
-        # الحفاظ على catcher كما هو
-        if 'catcher' in signal_type.lower():
-            return signal_type.strip()
-        
-        # التنظيف العادي للإشارات الأخرى
-        cleaned = re.sub(r'\[.*?\]|\(.*?\)|\d+\.?\d*', '', signal_type)
+        """تنظيف يحافظ على التطابق الدقيق مع .env"""
+        # لا تقم بأي تنظيف يغير هوية الإشارة
+        # فقط قم بإزالة الأقواس والمحتويات داخلها للحصول على الاسم الأساسي
+        cleaned = re.sub(r'\[.*?\]|\(.*?\)', '', signal_type)
         cleaned = ' '.join(cleaned.split()).strip()
         return cleaned
 
     def classify_signal(self, signal_data):
-        """تصنيف دقيق مع إعطاء أولوية لإشارات الاتجاه"""
+        """تصنيف يعتمد فقط على الإشارات المحددة في .env"""
         signal_type = self.clean_signal_type(signal_data['signal_type'])
         original_signal = signal_data.get('original_signal', signal_type)
         signal_data['signal_type'] = signal_type
@@ -449,37 +447,26 @@ class TradingSystem:
         print(f"🔍 [تصنيف] تنظيف الإشارة: '{original_signal}' -> '{signal_type}'")
         print(f"🔍 [تصنيف] تطبيع الإشارة: '{signal_type}' -> '{ns}'")
         
-        # 🔥 تحقق مباشر من إشارات catcher
-        original_lower = original_signal.lower()
-        if 'bullish_catcher' in original_lower or 'bearish_catcher' in original_lower:
-            print(f"🎯 [تصنيف مباشر] إشارة catcher -> trend: {original_signal}")
-            return 'trend'
-        
-        # 🔥 الأولوية لإشارات الاتجاه من .env
+        # 🔥 فقط الإشارات الموجودة في الفهرس (من .env) يتم التعرف عليها
         if ns in self.normalized_index:
             category = self.normalized_index[ns]
             print(f"✅ [تصنيف] إشارة '{signal_type}' -> '{category}' (من الفهرس)")
             return category
+        
+        # 🔥 تجاهل أي إشارة غير موجودة في .env
+        print(f"❌ [تصنيف] إشارة غير معروفة: '{signal_type}' -> 'unknown'")
+        return 'unknown'
 
-        # 🔥 إذا لم تكن في الفهرس، تطبيق القواعد الاحتياطية
-        ls = ns
-        print(f"🔍 [تصنيف] تطبيق القواعد الاحتياطية على: '{ls}'")
+    def handle_unknown_signal(self, signal_data):
+        """معالجة الإشارات غير المعروفة (غير موجودة في .env)"""
+        symbol = signal_data['ticker']
+        signal = signal_data['signal_type']
         
-        # منع تصنيف إشارات catcher كإشارات دخول
-        if 'bullish_catcher' in ls or 'bearish_catcher' in ls:
-            print(f"🎯 [تصنيف] إشارة catcher محولة إلى trend: {ls}")
-            return 'trend'
+        print(f"🚫 [غير معروفة] تجاهل إشارة غير معرفة في .env: {signal} للرمز {symbol}")
+        self.logger.warning(f"إشارة غير معروفة: {signal} للرمز {symbol}")
         
-        if 'bullish_tracer' in ls or 'bearish_tracer' in ls:
-            return 'trend_confirm'
-        if 'exit' in ls or 'close' in ls or 'tp' in ls or 'sl' in ls:
-            return 'exit'
-        if 'bearish' in ls:
-            return 'entry_bearish'
-        if 'bullish' in ls:
-            return 'entry_bullish'
-        
-        return 'general'
+        # تجاهل الإشارة تماماً
+        return False
 
     # =============================
     # معالجات حسب الفئة
