@@ -364,25 +364,37 @@ class TradingSystem:
         return self.handle_general_signal(signal_data)
 
     def parse_signal(self, raw_signal):
-        """تحليل نص الإشارة إلى أجزاء أساسية"""
+        """تحليل محسّن لنص الإشارة"""
         try:
             text = raw_signal.strip()
             if not text:
                 return None
+                
+            print(f"🔍 [تحليل] نص الإشارة الخام: '{text}'")
+            
+            # النمط الأساسي: Ticker : XYZ Signal : ABC Open : 123 Close : 456
             pattern = r'Ticker\s*:\s*(.+?)\s+Signal\s*:\s*(.+?)\s+Open\s*:\s*(.+?)\s+Close\s*:\s*(.+)'
             m = re.match(pattern, text)
             if m:
                 ticker, signal_type, open_price, close_price = m.groups()
+                print(f"✅ [تحليل] تطابق النمط الأساسي: {ticker} -> {signal_type}")
             else:
-                # بدائل مبسطة
-                if '|' in text:
-                    parts = [p.strip() for p in text.split('|')]
-                    if len(parts) >= 2:
+                # إذا لم يتطابق مع النمط الأساسي، افترض أن النص كله هو signal_type
+                # واستخدم رمز افتراضي أو استخرج الرمز من البداية
+                if ' ' in text:
+                    # افترض أن أول كلمة هي الرمز والباقي هو الإشارة
+                    parts = text.split(' ', 1)
+                    if len(parts) == 2:
                         ticker, signal_type = parts[0], parts[1]
+                        print(f"🔄 [تحليل] تقسيم النص: {ticker} -> {signal_type}")
                     else:
-                        return None
+                        ticker = "UNKNOWN"
+                        signal_type = text
                 else:
-                    ticker, signal_type = "BTCUSDT", text
+                    ticker = "UNKNOWN"
+                    signal_type = text
+                    print(f"⚠️ [تحليل] نص بسيط: {signal_type}")
+
             # تنظيف NaN
             s_lower = signal_type.lower()
             if 'nan' in s_lower:
@@ -393,15 +405,19 @@ class TradingSystem:
                 else:
                     return None
 
-            return {
+            result = {
                 'ticker': ticker.strip(),
                 'signal_type': signal_type.strip(),
                 'original_signal': signal_type.strip(),  # حفظ الإشارة الأصلية
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'source': 'TradingView'
             }
+            print(f"✅ [تحليل] نتيجة التحليل: {result}")
+            return result
+            
         except Exception as e:
             self.logger.error(f"خطأ في تحليل الإشارة: {e}")
+            print(f"❌ [تحليل] خطأ: {e}")
             return None
 
     # =============================
@@ -430,21 +446,33 @@ class TradingSystem:
         
         ns = self._normalize_signal_name(signal_type)
         
+        print(f"🔍 [تصنيف] تنظيف الإشارة: '{original_signal}' -> '{signal_type}'")
+        print(f"🔍 [تصنيف] تطبيع الإشارة: '{signal_type}' -> '{ns}'")
+        
+        # 🔥 تحقق مباشر من إشارات catcher
+        original_lower = original_signal.lower()
+        if 'bullish_catcher' in original_lower or 'bearish_catcher' in original_lower:
+            print(f"🎯 [تصنيف مباشر] إشارة catcher -> trend: {original_signal}")
+            return 'trend'
+        
         # 🔥 الأولوية لإشارات الاتجاه من .env
         if ns in self.normalized_index:
             category = self.normalized_index[ns]
             print(f"✅ [تصنيف] إشارة '{signal_type}' -> '{category}' (من الفهرس)")
             return category
 
-        # 🔥 قواعد احتياطية مع تحسين catcher
+        # 🔥 إذا لم تكن في الفهرس، تطبيق القواعد الاحتياطية
         ls = ns
-        if 'bullish_catcher' in ls:
+        print(f"🔍 [تصنيف] تطبيق القواعد الاحتياطية على: '{ls}'")
+        
+        # منع تصنيف إشارات catcher كإشارات دخول
+        if 'bullish_catcher' in ls or 'bearish_catcher' in ls:
+            print(f"🎯 [تصنيف] إشارة catcher محولة إلى trend: {ls}")
             return 'trend'
-        if 'bearish_catcher' in ls:
-            return 'trend'
+        
         if 'bullish_tracer' in ls or 'bearish_tracer' in ls:
             return 'trend_confirm'
-        if 'exit' in ls or 'close' in ls:
+        if 'exit' in ls or 'close' in ls or 'tp' in ls or 'sl' in ls:
             return 'exit'
         if 'bearish' in ls:
             return 'entry_bearish'
