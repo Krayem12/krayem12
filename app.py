@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AbuRayan_Bot_V8.3_Full.py
-نظام معالجة إشارات التداول - ملف واحد
-- التعرف فقط على الإشارات المحددة في .env
+AbuRayan_Bot_V8.4_Exact_Match.py
+نظام معالجة إشارات التداول - مطابقة تامة مع إشارات .env
+- المطابقة التامة مع الإشارات في .env (نسخ ولصق)
 - منع فتح الصفقات ضد الاتجاه بشكل صارم
 - منع إرسال رسائل الاتجاه المكررة إلا عند تغيير الاتجاه
 """
@@ -44,6 +44,7 @@ class TradingSystem:
         print(f"🎯 نظام اتجاه منفصل لكل رمز: مفعّل")
         print(f"🔒 منع الصفقات ضد الاتجاه: {'مفعّل' if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] else 'معطل'}")
         print(f"🔕 منع رسائل الاتجاه المكررة: مفعّل")
+        print(f"🎯 نظام المطابقة التامة مع .env: مفعّل")
 
     # =============================
     # الإعدادات والتهيئة
@@ -53,7 +54,7 @@ class TradingSystem:
         self.config = {
             # 🔧 أساسي
             'APP_NAME': config('APP_NAME', default='TradingSignalProcessor'),
-            'APP_VERSION': config('APP_VERSION', default='8.3.0'),
+            'APP_VERSION': config('APP_VERSION', default='8.4.0'),
             'DEBUG': config('DEBUG', default=False, cast=bool),
             'LOG_LEVEL': config('LOG_LEVEL', default='INFO'),
             'LOG_FILE': config('LOG_FILE', default='app.log'),
@@ -88,7 +89,7 @@ class TradingSystem:
 
         self.port = config('PORT', default=10000, cast=int)
 
-        # تحميل قوائم الإشارات (اختياري من .env)
+        # تحميل قوائم الإشارات
         self.signals = {
             'trend': self._load_signal_list('TREND_SIGNALS'),
             'trend_confirm': self._load_signal_list('TREND_CONFIRM_SIGNALS'),
@@ -98,15 +99,14 @@ class TradingSystem:
             'general': self._load_signal_list('GENERAL_SIGNALS')
         }
 
-        # فهرس سريع
-        self.normalized_index = {}
+        # فهرس سريع للمطابقة التامة
+        self.exact_index = {}
         for category, arr in self.signals.items():
             for s in arr:
-                ns = self._normalize_signal_name(s)
-                self.normalized_index[ns] = category
+                self.exact_index[s] = category  # حفظ الإشارة كما هي
 
     def _load_signal_list(self, key):
-        """تحسين تحميل الإشارات مع معالجة خاصة لـ catcher"""
+        """تحميل الإشارات مع معالجة خاصة لـ catcher"""
         try:
             signal_str = config(key, default='')
             if not signal_str:
@@ -142,15 +142,14 @@ class TradingSystem:
 
     def display_loaded_signals(self):
         """عرض تفصيلي للإشارات المحملة"""
-        print("\n🔖 الإشارات المحملة من .env:")
+        print("\n🔖 الإشارات المحملة من .env (مطابقة تامة):")
         for category, signals in self.signals.items():
             print(f"   📁 {category}:")
             for i, signal in enumerate(signals, 1):
-                normalized = self._normalize_signal_name(signal)
-                print(f"      {i}. {signal} -> '{normalized}'")
+                print(f"      {i}. '{signal}'")
         
-        print("\n🔖 الفهرس السريع:")
-        for signal, category in self.normalized_index.items():
+        print("\n🔖 الفهرس التام:")
+        for signal, category in self.exact_index.items():
             print(f"   📍 '{signal}' -> {category}")
 
     def setup_managers(self):
@@ -372,7 +371,7 @@ class TradingSystem:
         return self.handle_general_signal(signal_data)
 
     def parse_signal(self, raw_signal):
-        """تحليل محسّن لنص الإشارة"""
+        """تحليل محسّن لنص الإشارة مع الحفاظ على النص الأصلي تماماً"""
         try:
             text = raw_signal.strip()
             if not text:
@@ -385,7 +384,7 @@ class TradingSystem:
             m = re.match(pattern, text)
             if m:
                 ticker, signal_type, open_price, close_price = m.groups()
-                print(f"✅ [تحليل] تطابق النمط الأساسي: {ticker} -> {signal_type}")
+                print(f"✅ [تحليل] تطابق النمط الأساسي: {ticker} -> '{signal_type}'")
             else:
                 # إذا لم يتطابق مع النمط الأساسي، افترض أن النص كله هو signal_type
                 # واستخدم رمز افتراضي أو استخرج الرمز من البداية
@@ -394,14 +393,14 @@ class TradingSystem:
                     parts = text.split(' ', 1)
                     if len(parts) == 2:
                         ticker, signal_type = parts[0], parts[1]
-                        print(f"🔄 [تحليل] تقسيم النص: {ticker} -> {signal_type}")
+                        print(f"🔄 [تحليل] تقسيم النص: {ticker} -> '{signal_type}'")
                     else:
                         ticker = "UNKNOWN"
                         signal_type = text
                 else:
                     ticker = "UNKNOWN"
                     signal_type = text
-                    print(f"⚠️ [تحليل] نص بسيط: {signal_type}")
+                    print(f"⚠️ [تحليل] نص بسيط: '{signal_type}'")
 
             # تنظيف NaN
             s_lower = signal_type.lower()
@@ -415,7 +414,7 @@ class TradingSystem:
 
             result = {
                 'ticker': ticker.strip(),
-                'signal_type': signal_type.strip(),
+                'signal_type': signal_type.strip(),  # كما هي بدون تعديل
                 'original_signal': signal_type.strip(),  # حفظ الإشارة الأصلية
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'source': 'TradingView'
@@ -429,39 +428,26 @@ class TradingSystem:
             return None
 
     # =============================
-    # تصنيف الإشارات
+    # تصنيف الإشارات - المطابقة التامة
     # =============================
-    def _normalize_signal_name(self, name: str) -> str:
-        return re.sub(r'\s+', ' ', name.replace('_', ' ').replace('-', ' ').strip().lower())
-
     def clean_signal_type(self, signal_type):
-        """تنظيف يحافظ على التطابق الدقيق مع .env"""
-        # لا تقم بأي تنظيف يغير هوية الإشارة
-        # فقط قم بإزالة الأقواس والمحتويات داخلها للحصول على الاسم الأساسي
-        cleaned = re.sub(r'\[.*?\]|\(.*?\)', '', signal_type)
-        cleaned = ' '.join(cleaned.split()).strip()
-        return cleaned
+        """تنظيف يحافظ على التطابق التام مع .env"""
+        # فقط إزالة المسافات الطرفية للحفاظ على المطابقة التامة
+        return signal_type.strip()
 
     def classify_signal(self, signal_data):
-        """تصنيف يعتمد فقط على الإشارات المحددة في .env"""
+        """تصنيف يعتمد على المطابقة التامة مع إشارات .env"""
         signal_type = self.clean_signal_type(signal_data['signal_type'])
-        original_signal = signal_data.get('original_signal', signal_type)
-        signal_data['signal_type'] = signal_type
-        signal_data['original_signal'] = original_signal
         
-        ns = self._normalize_signal_name(signal_type)
+        print(f"🔍 [تصنيف] البحث عن تطابق تام للإشارة: '{signal_type}'")
         
-        print(f"🔍 [تصنيف] تنظيف الإشارة: '{original_signal}' -> '{signal_type}'")
-        print(f"🔍 [تصنيف] تطبيع الإشارة: '{signal_type}' -> '{ns}'")
-        
-        # 🔥 فقط الإشارات الموجودة في الفهرس (من .env) يتم التعرف عليها
-        if ns in self.normalized_index:
-            category = self.normalized_index[ns]
-            print(f"✅ [تصنيف] إشارة '{signal_type}' -> '{category}' (من الفهرس)")
+        # البحث المباشر في الفهرس التام
+        if signal_type in self.exact_index:
+            category = self.exact_index[signal_type]
+            print(f"✅ [تصنيف] تطابق تام: '{signal_type}' -> '{category}'")
             return category
         
-        # 🔥 تجاهل أي إشارة غير موجودة في .env
-        print(f"❌ [تصنيف] إشارة غير معروفة: '{signal_type}' -> 'unknown'")
+        print(f"❌ [تصنيف] لا يوجد تطابق تام: '{signal_type}' -> 'unknown'")
         return 'unknown'
 
     def handle_unknown_signal(self, signal_data):
@@ -469,8 +455,8 @@ class TradingSystem:
         symbol = signal_data['ticker']
         signal = signal_data['signal_type']
         
-        print(f"🚫 [غير معروفة] تجاهل إشارة غير معرفة في .env: {signal} للرمز {symbol}")
-        self.logger.warning(f"إشارة غير معروفة: {signal} للرمز {symbol}")
+        print(f"🚫 [غير معروفة] تجاهل إشارة غير معرفة في .env: '{signal}' للرمز {symbol}")
+        self.logger.warning(f"إشارة غير معروفة: '{signal}' للرمز {symbol}")
         
         # تجاهل الإشارة تماماً
         return False
@@ -484,7 +470,7 @@ class TradingSystem:
         original_signal = signal_data.get('original_signal', signal_data['signal_type'])
         s = original_signal.lower()
         
-        print(f"🎯 [اتجاه] معالجة إشارة اتجاه: {original_signal} للرمز {symbol}")
+        print(f"🎯 [اتجاه] معالجة إشارة اتجاه: '{original_signal}' للرمز {symbol}")
 
         if 'bullish_catcher' in s or 'bullish_trend' in s:
             new_trend = 'BULLISH'
@@ -493,7 +479,7 @@ class TradingSystem:
             new_trend = 'BEARISH'
             trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
         else:
-            print(f"❌ [اتجاه] إشارة اتجاه غير معروفة: {original_signal}")
+            print(f"❌ [اتجاه] إشارة اتجاه غير معروفة: '{original_signal}'")
             return False
 
         current_trend = self.symbol_trends.get(symbol)
@@ -598,7 +584,7 @@ class TradingSystem:
         
         # 🔥 منع معالجة إشارات catcher كإشارات دخول
         if 'catcher' in original_signal.lower():
-            print(f"🚫 [دخول] تجاهل إشارة اتجاه كإشارة دخول: {original_signal}")
+            print(f"🚫 [دخول] تجاهل إشارة اتجاه كإشارة دخول: '{original_signal}'")
             return False
         
         symbol = signal_data['ticker']
@@ -664,9 +650,9 @@ class TradingSystem:
             group['unique_signals'].add(clean_type)
             group['signals_data'].append(signal_data)
             group['updated_at'] = now
-            self.logger.info(f"إشارة فريدة: {signal_data['signal_type']} للمجموعة {signal_category}")
+            self.logger.info(f"إشارة فريدة: '{signal_data['signal_type']}' للمجموعة {signal_category}")
         else:
-            self.logger.info(f"تجاهل إشارة مكررة: {signal_data['signal_type']}")
+            self.logger.info(f"تجاهل إشارة مكررة: '{signal_data['signal_type']}'")
             return True
 
         if len(group['unique_signals']) >= self.config['REQUIRED_CONFIRMATIONS']:
@@ -741,7 +727,7 @@ class TradingSystem:
         if self.should_send_message('general', signal_data):
             self.send_telegram(msg)
         self.send_to_external_server_with_retry(msg, 'general')
-        self.logger.info(f"إشارة عامة: {signal_data['signal_type']}")
+        self.logger.info(f"إشارة عامة: '{signal_data['signal_type']}'")
         return True
 
     def find_active_trade(self, ticker):
