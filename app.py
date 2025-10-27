@@ -4,6 +4,7 @@
 AbuRayan_Bot_V8.3_Full.py
 نظام معالجة إشارات التداول - ملف واحد
 - التعرف فقط على الإشارات المحددة في .env
+- منع فتح الصفقات ضد الاتجاه بشكل صارم
 - تجاهل أي إشارة غير موجودة في الفهرس
 """
 
@@ -41,6 +42,7 @@ class TradingSystem:
         print(f"✅ التأكيد المطلوب: {self.config['REQUIRED_CONFIRMATIONS']} إشارات مختلفة من نفس المجموعة")
         print(f"📊 الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
         print(f"🎯 نظام اتجاه منفصل لكل رمز: مفعّل")
+        print(f"🔒 منع الصفقات ضد الاتجاه: {'مفعّل' if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] else 'معطل'}")
 
     # =============================
     # الإعدادات والتهيئة
@@ -352,12 +354,15 @@ class TradingSystem:
         signal_data['category'] = category
         self.logger.info(f"إشارة مصنفة: {signal_data['signal_type']} -> {category}")
 
-        if category == 'unknown':
-            return self.handle_unknown_signal(signal_data)
+        # 🔥 معالجة إشارات الاتجاه أولاً لتحديث اتجاه الرمز
         if category == 'trend':
             return self.handle_trend_signal(signal_data)
         if category == 'trend_confirm':
             return self.handle_trend_confirmation(signal_data)
+        
+        # 🔥 ثم معالجة إشارات الدخول مع الاتجاه المحدث
+        if category == 'unknown':
+            return self.handle_unknown_signal(signal_data)
         if category == 'exit':
             return self.handle_exit_signal(signal_data)
         if category in ('entry_bullish', 'entry_bearish'):
@@ -553,7 +558,7 @@ class TradingSystem:
         return True
 
     def handle_entry_signal(self, signal_data, signal_category):
-        """منع معالجة إشارات الاتجاه كإشارات دخول"""
+        """معالجة محسنة لإشارات الدخول مع تطبيق صارم لشرط الاتجاه"""
         original_signal = signal_data.get('original_signal', signal_data['signal_type'])
         
         # 🔥 منع معالجة إشارات catcher كإشارات دخول
@@ -574,13 +579,23 @@ class TradingSystem:
             self.logger.warning("الحد الأقصى للصفقات مكتفي")
             return False
 
-        # محاذاة الاتجاه (اختياري)
+        # 🔥 🔥 🔥 التصحيح: تطبيق شرط الاتجاه بشكل صارم
         symbol_trend = self.symbol_trends.get(symbol)
-        if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] and symbol_trend:
+        print(f"🔍 [اتجاه] التحقق من مطابقة الاتجاه: {symbol} -> {symbol_trend}, الإشارة: {signal_category}")
+        
+        if self.config['RESPECT_TREND_FOR_REGULAR_TRADES']:
+            if not symbol_trend:
+                print(f"❌ [اتجاه] لا يمكن فتح صفقة: لا يوجد اتجاه محدد للرمز {symbol}")
+                self.logger.warning(f"لا يمكن فتح صفقة: لا يوجد اتجاه محدد للرمز {symbol}")
+                return False
+            
             if (signal_category == 'entry_bullish' and symbol_trend != 'BULLISH') or \
                (signal_category == 'entry_bearish' and symbol_trend != 'BEARISH'):
-                self.logger.warning(f"الإشارة لا تتطابق مع اتجاه {symbol}")
+                print(f"❌ [اتجاه] رفض الصفقة: إشارة {signal_category} ضد اتجاه {symbol_trend} للرمز {symbol}")
+                self.logger.warning(f"الإشارة لا تتطابق مع اتجاه {symbol} ({symbol_trend})")
                 return False
+            else:
+                print(f"✅ [اتجاه] الصفقة مطابقة للاتجاه: {signal_category} مع {symbol_trend}")
 
         # تجميع للتأكيد
         key = f"{symbol}_{signal_category}"
