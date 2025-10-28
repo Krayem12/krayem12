@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AbuRayan_Bot_V8.6_Fixed_Parser.py
-نظام معالجة إشارات التداول - إصلاح تحليل الإشارات
-- إصلاح مشكلة تحليل التنسيق الطويل للإشارات
-- المطابقة التامة مع الإشارات في .env
-- منع فتح الصفقات ضد الاتجاه بشكل صارم
-- تحسينات أمنية: إدارة توكنات آمنة + تحقق من IP المصدر
+AbuRayan_Bot_V8.7_Flexible_Matching.py
+نظام معالجة إشارات التداول - مطابقة مرنة مع الحفاظ على الدقة
+- نظام مطابقة مرن مع البحث بالكلمات المفتاحية
+- يحافظ على المطابقة التامة عندما تكون ممكنة
+- يعالج الاختلافات في المسافات والحروف
 """
 
 import os
@@ -45,9 +44,8 @@ class TradingSystem:
         print(f"🎯 نظام اتجاه منفصل لكل رمز: مفعّل")
         print(f"🔒 منع الصفقات ضد الاتجاه: {'مفعّل' if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] else 'معطل'}")
         print(f"🔕 منع رسائل الاتجاه المكررة: مفعّل")
-        print(f"🎯 نظام المطابقة التامة مع .env: مفعّل")
+        print(f"🎯 نظام المطابقة المرن: مفعّل")
         print(f"🔐 نظام الأمان المحسن: مفعّل")
-        print(f"🔄 محلل الإشارات المحسن: مفعّل")
 
     # =============================
     # الإعدادات والتهيئة
@@ -57,7 +55,7 @@ class TradingSystem:
         self.config = {
             # 🔧 أساسي
             'APP_NAME': config('APP_NAME', default='TradingSignalProcessor'),
-            'APP_VERSION': config('APP_VERSION', default='8.6.0'),
+            'APP_VERSION': config('APP_VERSION', default='8.7.0'),
             'DEBUG': config('DEBUG', default=False, cast=bool),
             'LOG_LEVEL': config('LOG_LEVEL', default='INFO'),
             'LOG_FILE': config('LOG_FILE', default='app.log'),
@@ -105,58 +103,94 @@ class TradingSystem:
             'general': self._load_signal_list('GENERAL_SIGNALS')
         }
 
-        # فهرس سريع للمطابقة التامة
-        self.exact_index = {}
-        for category, arr in self.signals.items():
-            for s in arr:
-                self.exact_index[s] = category  # حفظ الإشارة كما هي
+        # إنشاء فهرس مرن للإشارات
+        self.setup_flexible_index()
 
     def _load_signal_list(self, key):
-        """تحميل الإشارات مع معالجة خاصة لـ catcher"""
+        """تحميل الإشارات مع معالجة خاصة"""
         try:
             signal_str = config(key, default='')
             if not signal_str:
                 return []
             
-            # معالجة خاصة للإشارات التي تحتوي على catcher
-            if 'catcher' in signal_str.lower():
-                signals = [s.strip() for s in signal_str.split(',') if s.strip()]
-                print(f"✅ [تحميل] إشارات catcher في {key}: {signals}")
-                return signals
-            
-            # المعالجة الأصلية للإشارات الأخرى
-            signals, current, inside = [], "", False
-            for ch in signal_str:
-                if ch == '(':
-                    inside = True
-                    current += ch
-                elif ch == ')':
-                    inside = False
-                    current += ch
-                elif ch == ',' and not inside:
-                    if current.strip():
-                        signals.append(current.strip())
-                    current = ""
-                else:
-                    current += ch
-            if current.strip():
-                signals.append(current.strip())
+            signals = [s.strip() for s in signal_str.split(',') if s.strip()]
+            print(f"✅ [تحميل] إشارات {key}: {len(signals)} إشارة")
             return signals
+            
         except Exception as e:
             print(f"❌ خطأ في تحميل {key}: {e}")
             return []
 
+    def setup_flexible_index(self):
+        """إعداد فهرس مرن للإشارات مع كلمات مفتاحية"""
+        self.flexible_index = {}
+        self.keyword_index = {}
+        
+        for category, signals in self.signals.items():
+            for signal in signals:
+                # الفهرس التام (الأصلي)
+                self.flexible_index[signal] = category
+                
+                # الفهرس المرن (بدون مسافات وحروف صغيرة)
+                normalized = self.normalize_signal(signal)
+                self.flexible_index[normalized] = category
+                
+                # فهرس الكلمات المفتاحية
+                keywords = self.extract_keywords(signal)
+                for keyword in keywords:
+                    if keyword not in self.keyword_index:
+                        self.keyword_index[keyword] = []
+                    self.keyword_index[keyword].append((category, signal))
+        
+        print(f"🔍 الفهرس المرن جاهز: {len(self.flexible_index)} إدخال")
+        print(f"🔑 فهرس الكلمات المفتاحية: {len(self.keyword_index)} كلمة مفتاحية")
+
+    def normalize_signal(self, signal):
+        """تطبيع الإشارة للمقارنة المرنة"""
+        # تحويل لحروف صغيرة وإزالة مسافات زائدة
+        normalized = signal.lower().strip()
+        # استبدال المسافات المتعددة بمسافة واحدة
+        normalized = re.sub(r'\s+', ' ', normalized)
+        # إزالة المسافات تماماً للمقارنة المرنة
+        normalized_no_spaces = normalized.replace(' ', '')
+        return normalized_no_spaces
+
+    def extract_keywords(self, signal):
+        """استخراج الكلمات المفتاحية من الإشارة"""
+        signal_lower = signal.lower()
+        keywords = set()
+        
+        # الكلمات المفتاحية الرئيسية
+        main_keywords = [
+            'bullish', 'bearish', 'catcher', 'tracer', 'overflow', 'divergence',
+            'confluence', 'confirmation', 'reversal', 'oversold', 'overbought',
+            'hyperwave', 'moneyflow', 'ichoch', 'schoch', 'ibos', 'sbos',
+            'trendline', 'liquidity', 'imbalance', 'turn', 'switch'
+        ]
+        
+        for keyword in main_keywords:
+            if keyword in signal_lower:
+                keywords.add(keyword)
+        
+        # إضافة الإشارة كاملة (مطبعة) ككلمة مفتاحية
+        normalized = self.normalize_signal(signal)
+        keywords.add(normalized)
+        
+        return list(keywords)
+
     def display_loaded_signals(self):
         """عرض تفصيلي للإشارات المحملة"""
-        print("\n🔖 الإشارات المحملة من .env (مطابقة تامة):")
+        print("\n🔖 الإشارات المحملة من .env:")
         for category, signals in self.signals.items():
-            print(f"   📁 {category}:")
-            for i, signal in enumerate(signals, 1):
+            print(f"   📁 {category} ({len(signals)} إشارة):")
+            for i, signal in enumerate(signals[:5], 1):  # عرض أول 5 إشارات فقط
                 print(f"      {i}. '{signal}'")
+            if len(signals) > 5:
+                print(f"      ... و {len(signals) - 5} إشارات أخرى")
         
-        print("\n🔖 الفهرس التام:")
-        for signal, category in self.exact_index.items():
-            print(f"   📍 '{signal}' -> {category}")
+        print("\n🔑 الكلمات المفتاحية الرئيسية:")
+        main_keywords = [k for k in self.keyword_index.keys() if len(k) > 3]
+        print(f"   📍 {', '.join(main_keywords[:10])}...")
 
     def setup_managers(self):
         self.pending_signals = {}          # تأكيد الدخول
@@ -399,7 +433,8 @@ class TradingSystem:
             "security": {
                 "allowed_ips": self.config['ALLOWED_IPS'],
                 "ip_validation": "مفعّل" if self.config['ALLOWED_IPS'] else "معطل"
-            }
+            },
+            "matching_system": "مرن مع كلمات مفتاحية"
         }
 
     # =============================
@@ -459,7 +494,7 @@ class TradingSystem:
             self.logger.warning(f"إشارة غير صالحة: {raw_signal}")
             return False
 
-        category = self.classify_signal(signal_data)
+        category = self.classify_signal_flexible(signal_data)
         signal_data['category'] = category
         self.logger.info(f"إشارة مصنفة: {signal_data['signal_type']} -> {category}")
 
@@ -541,26 +576,63 @@ class TradingSystem:
             return None
 
     # =============================
-    # تصنيف الإشارات - المطابقة التامة
+    # تصنيف الإشارات - نظام مطابقة مرن
     # =============================
-    def clean_signal_type(self, signal_type):
-        """تنظيف يحافظ على التطابق التام مع .env"""
-        # فقط إزالة المسافات الطرفية للحفاظ على المطابقة التامة
-        return signal_type.strip()
-
-    def classify_signal(self, signal_data):
-        """تصنيف يعتمد على المطابقة التامة مع إشارات .env"""
-        signal_type = self.clean_signal_type(signal_data['signal_type'])
+    def classify_signal_flexible(self, signal_data):
+        """تصنيف مرن يعتمد على المطابقة بالكلمات المفتاحية"""
+        signal_type = signal_data['signal_type']
         
-        print(f"🔍 [تصنيف] البحث عن تطابق تام للإشارة: '{signal_type}'")
+        print(f"🔍 [تصنيف مرن] البحث عن: '{signal_type}'")
         
-        # البحث المباشر في الفهرس التام
-        if signal_type in self.exact_index:
-            category = self.exact_index[signal_type]
-            print(f"✅ [تصنيف] تطابق تام: '{signal_type}' -> '{category}'")
+        # 1. أولاً: المطابقة التامة
+        if signal_type in self.flexible_index:
+            category = self.flexible_index[signal_type]
+            print(f"✅ [مطابقة تامة] '{signal_type}' -> '{category}'")
             return category
         
-        print(f"❌ [تصنيف] لا يوجد تطابق تام: '{signal_type}' -> 'unknown'")
+        # 2. ثانياً: المطابقة المطبعة (بدون مسافات)
+        normalized = self.normalize_signal(signal_type)
+        if normalized in self.flexible_index:
+            category = self.flexible_index[normalized]
+            print(f"✅ [مطابقة مطبعة] '{normalized}' -> '{category}'")
+            return category
+        
+        # 3. ثالثاً: البحث بالكلمات المفتاحية
+        category = self.keyword_based_classification(signal_type)
+        if category != 'unknown':
+            print(f"✅ [مطابقة بالكلمات] '{signal_type}' -> '{category}'")
+            return category
+        
+        print(f"❌ [غير معروفة] لا يوجد تطابق لـ '{signal_type}'")
+        return 'unknown'
+
+    def keyword_based_classification(self, signal_type):
+        """تصنيف الإشارة بناء على الكلمات المفتاحية"""
+        signal_lower = signal_type.lower()
+        normalized = self.normalize_signal(signal_type)
+        
+        # البحث عن الكلمات المفتاحية في الإشارة
+        found_keywords = []
+        for keyword, matches in self.keyword_index.items():
+            if keyword in normalized or keyword in signal_lower:
+                found_keywords.extend(matches)
+        
+        if not found_keywords:
+            return 'unknown'
+        
+        # تحليل النتائج
+        category_scores = {}
+        for category, original_signal in found_keywords:
+            if category not in category_scores:
+                category_scores[category] = 0
+            category_scores[category] += 1
+        
+        # اختيار الفئة الأكثر تكراراً
+        if category_scores:
+            best_category = max(category_scores.items(), key=lambda x: x[1])
+            print(f"🔑 [كلمات مفتاحية] وجدت {len(found_keywords)} تطابق، أفضل فئة: {best_category[0]}")
+            return best_category[0]
+        
         return 'unknown'
 
     def handle_unknown_signal(self, signal_data):
@@ -568,14 +640,14 @@ class TradingSystem:
         symbol = signal_data['ticker']
         signal = signal_data['signal_type']
         
-        print(f"🚫 [غير معروفة] تجاهل إشارة غير معرفة في .env: '{signal}' للرمز {symbol}")
+        print(f"🚫 [غير معروفة] تجاهل إشارة غير معرفة: '{signal}' للرمز {symbol}")
         self.logger.warning(f"إشارة غير معروفة: '{signal}' للرمز {symbol}")
         
         # تجاهل الإشارة تماماً
         return False
 
     # =============================
-    # معالجات حسب الفئة
+    # معالجات حسب الفئة (نفس الدوال السابقة)
     # =============================
     def handle_trend_signal(self, signal_data):
         """معالجة محسنة لإشارات الاتجاه مع منع الإرسال المكرر"""
@@ -585,11 +657,12 @@ class TradingSystem:
         
         print(f"🎯 [اتجاه] معالجة إشارة اتجاه: '{original_signal}' للرمز {symbol}")
 
-        if 'bullish_catcher' in s or 'bullish_trend' in s:
+        # البحث عن نوع الاتجاه في الإشارة
+        if 'bullish' in s and any(keyword in s for keyword in ['catcher', 'ichoch', 'trend']):
             new_trend = 'BULLISH'
             trend_icon, trend_text = "🟢📈", "شراء (اتجاه صاعد)"
-        elif 'bearish_catcher' in s or 'bearish_trend' in s:
-            new_trend = 'BEARISH'
+        elif 'bearish' in s and any(keyword in s for keyword in ['catcher', 'ichoch', 'trend']):
+            new_trend = 'BEARISH' 
             trend_icon, trend_text = "🔴📉", "بيع (اتجاه هابط)"
         else:
             print(f"❌ [اتجاه] إشارة اتجاه غير معروفة: '{original_signal}'")
@@ -608,19 +681,9 @@ class TradingSystem:
         same_as_last_notification = last_notified_trend == new_trend
         
         print(f"🔍 [اتجاه] {symbol}: الحالي={current_trend}, الجديد={new_trend}, تغيير={changed}")
-        print(f"🔍 [إشعار] آخر إشعار={last_notified_trend}, نفس الإشعار={same_as_last_notification}")
 
         # 🔥 إرسال الإشعار فقط إذا تغير الاتجاه أو لم يتم الإشعار مسبقاً
-        should_notify = False
-        
-        if changed:
-            should_notify = True
-            print(f"🔄 [اتجاه] تغيير اتجاه {symbol}: {current_trend} -> {new_trend}")
-        elif last_notified_trend is None:
-            should_notify = True
-            print(f"📢 [اتجاه] أول إشعار لاتجاه {symbol}: {new_trend}")
-        else:
-            print(f"🔕 [اتجاه] تجاهل إشعار مكرر لـ {symbol}: {new_trend}")
+        should_notify = changed or last_notified_trend is None
 
         if should_notify:
             msg = self.format_trend_message(signal_data, trend_icon, trend_text)
@@ -695,11 +758,6 @@ class TradingSystem:
         """معالجة محسنة لإشارات الدخول مع تطبيق صارم لشرط الاتجاه"""
         original_signal = signal_data.get('original_signal', signal_data['signal_type'])
         
-        # 🔥 منع معالجة إشارات catcher كإشارات دخول
-        if 'catcher' in original_signal.lower():
-            print(f"🚫 [دخول] تجاهل إشارة اتجاه كإشارة دخول: '{original_signal}'")
-            return False
-        
         symbol = signal_data['ticker']
 
         # لا أكثر من صفقة للرمز
@@ -713,7 +771,7 @@ class TradingSystem:
             self.logger.warning("الحد الأقصى للصفقات مكتفي")
             return False
 
-        # 🔥 🔥 🔥 التصحيح: تطبيق شرط الاتجاه بشكل صارم
+        # 🔥 تطبيق شرط الاتجاه بشكل صارم
         symbol_trend = self.symbol_trends.get(symbol)
         print(f"🔍 [اتجاه] التحقق من مطابقة الاتجاه: {symbol} -> {symbol_trend}, الإشارة: {signal_category}")
         
@@ -744,7 +802,7 @@ class TradingSystem:
                 'signal_category': signal_category
             }
 
-        clean_type = self.clean_signal_type(signal_data['signal_type'])
+        clean_type = self.normalize_signal(signal_data['signal_type'])
         group = self.pending_signals[key]
 
         now = datetime.now()
@@ -853,7 +911,7 @@ class TradingSystem:
     # التحكم في الإرسال
     # =============================
     def should_send_message(self, message_type, signal_data=None):
-        """فلتر الإرسال لتيليجرام (ويُستخدم نفس القرار للخادم الخارجي لتطابق السلوك)"""
+        """فلتر الإرسال لتيليجرام"""
         type_controls = {
             'trend': self.config['SEND_TREND_MESSAGES'],
             'entry': self.config['SEND_ENTRY_MESSAGES'],
@@ -878,7 +936,7 @@ class TradingSystem:
         return True
 
     # =============================
-    # قوالب الرسائل (مطابقة)
+    # قوالب الرسائل (نفس القوالب السابقة)
     # =============================
     def format_trend_message(self, signal_data, trend_icon, trend_text):
         symbol = signal_data['ticker']
@@ -1010,8 +1068,6 @@ class TradingSystem:
     def send_to_external_server(self, message_text, message_type):
         """
         إرسال للقروب الاحتياطي كنص خام 1:1
-        - Content-Type: text/plain; charset=utf-8
-        - Body = الرسالة نفسها (بدون message= وبدون ترميز URL وبدون JSON)
         """
         if not self.config['EXTERNAL_SERVER_ENABLED']:
             return False
@@ -1037,7 +1093,7 @@ class TradingSystem:
             return False
 
     def send_to_external_server_with_retry(self, message_text, message_type, max_retries=2):
-        """إعادة المحاولة للخادم الخارجي، مع احترام فلاتر should_send_message"""
+        """إعادة المحاولة للخادم الخارجي"""
         if not self.should_send_message(
             'trend' if message_type == 'trend' else
             'entry' if message_type == 'entry' else
