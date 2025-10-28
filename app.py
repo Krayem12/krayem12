@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AbuRayan_Bot_V8.4_Exact_Match.py
-نظام معالجة إشارات التداول - مطابقة تامة مع إشارات .env
+AbuRayan_Bot_V8.5_Secure.py
+نظام معالجة إشارات التداول - نسخة محسنة أمنياً
 - المطابقة التامة مع الإشارات في .env (نسخ ولصق)
 - منع فتح الصفقات ضد الاتجاه بشكل صارم
 - منع إرسال رسائل الاتجاه المكررة إلا عند تغيير الاتجاه
+- تحسينات أمنية: إدارة توكنات آمنة + تحقق من IP المصدر
 """
 
 import os
@@ -45,6 +46,7 @@ class TradingSystem:
         print(f"🔒 منع الصفقات ضد الاتجاه: {'مفعّل' if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] else 'معطل'}")
         print(f"🔕 منع رسائل الاتجاه المكررة: مفعّل")
         print(f"🎯 نظام المطابقة التامة مع .env: مفعّل")
+        print(f"🔐 نظام الأمان المحسن: مفعّل")
 
     # =============================
     # الإعدادات والتهيئة
@@ -54,7 +56,7 @@ class TradingSystem:
         self.config = {
             # 🔧 أساسي
             'APP_NAME': config('APP_NAME', default='TradingSignalProcessor'),
-            'APP_VERSION': config('APP_VERSION', default='8.4.0'),
+            'APP_VERSION': config('APP_VERSION', default='8.5.0'),
             'DEBUG': config('DEBUG', default=False, cast=bool),
             'LOG_LEVEL': config('LOG_LEVEL', default='INFO'),
             'LOG_FILE': config('LOG_FILE', default='app.log'),
@@ -85,6 +87,9 @@ class TradingSystem:
             'SEND_GENERAL_MESSAGES': config('SEND_GENERAL_MESSAGES', default=False, cast=bool),
             'SEND_BULLISH_SIGNALS': config('SEND_BULLISH_SIGNALS', default=True, cast=bool),
             'SEND_BEARISH_SIGNALS': config('SEND_BEARISH_SIGNALS', default=True, cast=bool),
+
+            # 🔐 إعدادات الأمان
+            'ALLOWED_IPS': config('ALLOWED_IPS', default='')
         }
 
         self.port = config('PORT', default=10000, cast=int)
@@ -186,6 +191,90 @@ class TradingSystem:
         self.logger.addHandler(sh)
 
     # =============================
+    # الأمان والتحقق
+    # =============================
+
+    def safe_get_token(self, token_name):
+        """استخراج التوكن بشكل آمن مع التحقق من الصحة"""
+        token = self.config.get(token_name, '')
+        
+        if not token:
+            self.logger.error(f"❌ التوكن {token_name} فارغ")
+            return None
+            
+        forbidden_values = ['', 'your_bot_token_here', 'your_chat_id_here', 'undefined', 'none']
+        if token.lower() in forbidden_values:
+            self.logger.error(f"❌ التوكن {token_name} غير مضبوط بشكل صحيح")
+            return None
+            
+        return token
+
+    def validate_signal_source(self, request):
+        """التحقق من مصدر الإشارة بناء على IP المسموح به"""
+        try:
+            allowed_ips = self.config['ALLOWED_IPS']
+            if not allowed_ips:
+                # إذا لم يتم تحديد IPs مسموحة، نقبل جميع المصادر
+                return True
+
+            client_ip = self.get_client_ip(request)
+            allowed_list = [ip.strip() for ip in allowed_ips.split(',') if ip.strip()]
+            
+            if client_ip in allowed_list:
+                print(f"✅ IP مصرح: {client_ip}")
+                return True
+            else:
+                print(f"🚫 IP غير مصرح: {client_ip} - المسموح: {allowed_list}")
+                self.logger.warning(f"محاولة وصول من IP غير مصرح: {client_ip}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"خطأ في التحقق من IP المصدر: {e}")
+            return False
+
+    def get_client_ip(self, request):
+        """استخراج IP العميل الحقيقي مع دعم reverse proxy"""
+        # X-Forwarded-For للطلبات خلف proxy
+        if request.headers.get('X-Forwarded-For'):
+            ip = request.headers['X-Forwarded-For'].split(',')[0].strip()
+            print(f"🌐 IP من X-Forwarded-For: {ip}")
+            return ip
+        
+        # Fallback إلى remote_addr
+        ip = request.remote_addr or 'UNKNOWN'
+        print(f"🌐 IP من remote_addr: {ip}")
+        return ip
+
+    def validate_signal_content(self, raw_signal):
+        """التحقق من محتوى الإشارة لمنع الهجمات"""
+        if not raw_signal or len(raw_signal.strip()) == 0:
+            return False
+            
+        # منع payloads كبيرة جداً
+        if len(raw_signal) > 10000:
+            self.logger.warning(f"إشارة كبيرة جداً: {len(raw_signal)} حرف")
+            return False
+            
+        # منع محاولات الحقن (يمكن توسيعه حسب الحاجة)
+        injection_patterns = [
+            r';.*DROP',
+            r';.*DELETE',
+            r';.*UPDATE',
+            r'<script>',
+            r'javascript:',
+            r'onload=',
+            r'onerror='
+        ]
+        
+        signal_lower = raw_signal.lower()
+        for pattern in injection_patterns:
+            if re.search(pattern, signal_lower, re.IGNORECASE):
+                self.logger.warning(f"محتوى خطير مكتشف في الإشارة: {pattern}")
+                return False
+                
+        return True
+
+    # =============================
     # تشخيص الشبكة والإعدادات
     # =============================
     def diagnose_external_server(self):
@@ -242,7 +331,11 @@ class TradingSystem:
 
     def test_telegram_connection(self):
         try:
-            url = f"https://api.telegram.org/bot{self.config['TELEGRAM_BOT_TOKEN']}/getMe"
+            token = self.safe_get_token('TELEGRAM_BOT_TOKEN')
+            if not token:
+                return False
+                
+            url = f"https://api.telegram.org/bot{token}/getMe"
             r = requests.get(url, timeout=10)
             return r.status_code == 200
         except Exception as e:
@@ -301,7 +394,11 @@ class TradingSystem:
             "open_trades": len([t for t in self.active_trades.values() if t['status'] == 'OPEN']),
             "pending_groups": len(self.pending_signals),
             "trends": self.symbol_trends,
-            "last_notifications": self.last_trend_notifications
+            "last_notifications": self.last_trend_notifications,
+            "security": {
+                "allowed_ips": self.config['ALLOWED_IPS'],
+                "ip_validation": "مفعّل" if self.config['ALLOWED_IPS'] else "معطل"
+            }
         }
 
     # =============================
@@ -309,11 +406,21 @@ class TradingSystem:
     # =============================
     def handle_webhook(self, request):
         try:
+            # 🔐 التحقق من IP المصدر
+            if not self.validate_signal_source(request):
+                return jsonify({"status": "error", "message": "مصدر غير مصرح"}), 403
+
             raw_signal = self.extract_signal_data(request)
+            
+            # 🔐 التحقق من محتوى الإشارة
+            if not self.validate_signal_content(raw_signal):
+                return jsonify({"status": "error", "message": "محتوى الإشارة غير صالح"}), 400
+                
             if not raw_signal:
                 return jsonify({"status": "error", "message": "إشارة فارغة"}), 400
 
-            self.logger.info(f"إشارة مستلمة: {raw_signal}")
+            client_ip = self.get_client_ip(request)
+            self.logger.info(f"إشارة مستلمة من {client_ip}: {raw_signal}")
             success = self.process_signal(raw_signal)
 
             if success:
@@ -863,16 +970,19 @@ class TradingSystem:
         if not self.config['TELEGRAM_ENABLED']:
             print("❌ Telegram معطل")
             return False
-        if not self.config['TELEGRAM_BOT_TOKEN'] or self.config['TELEGRAM_BOT_TOKEN'] == 'your_bot_token_here':
-            print(f"📲 محاكاة Telegram (TOKEN غير مضبوط):\n{message}")
-            return True
-        if not self.config['TELEGRAM_CHAT_ID'] or self.config['TELEGRAM_CHAT_ID'] == 'your_chat_id_here':
-            print("❌ TELEGRAM_CHAT_ID غير مضبوط")
+
+        # استخدام الدالة الآمنة لاستخراج التوكنات
+        token = self.safe_get_token('TELEGRAM_BOT_TOKEN')
+        chat_id = self.safe_get_token('TELEGRAM_CHAT_ID')
+        
+        if not token or not chat_id:
+            print("❌ توكن Telegram غير مضبوط بشكل صحيح")
             return False
+
         try:
-            url = f"https://api.telegram.org/bot{self.config['TELEGRAM_BOT_TOKEN']}/sendMessage"
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
             payload = {
-                'chat_id': self.config['TELEGRAM_CHAT_ID'],
+                'chat_id': chat_id,
                 'text': message,
                 'parse_mode': 'HTML'
             }
