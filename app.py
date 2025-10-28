@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AbuRayan_Bot_V8.5_Secure.py
-نظام معالجة إشارات التداول - نسخة محسنة أمنياً
-- المطابقة التامة مع الإشارات في .env (نسخ ولصق)
+AbuRayan_Bot_V8.6_Fixed_Parser.py
+نظام معالجة إشارات التداول - إصلاح تحليل الإشارات
+- إصلاح مشكلة تحليل التنسيق الطويل للإشارات
+- المطابقة التامة مع الإشارات في .env
 - منع فتح الصفقات ضد الاتجاه بشكل صارم
-- منع إرسال رسائل الاتجاه المكررة إلا عند تغيير الاتجاه
 - تحسينات أمنية: إدارة توكنات آمنة + تحقق من IP المصدر
 """
 
@@ -47,6 +47,7 @@ class TradingSystem:
         print(f"🔕 منع رسائل الاتجاه المكررة: مفعّل")
         print(f"🎯 نظام المطابقة التامة مع .env: مفعّل")
         print(f"🔐 نظام الأمان المحسن: مفعّل")
+        print(f"🔄 محلل الإشارات المحسن: مفعّل")
 
     # =============================
     # الإعدادات والتهيئة
@@ -56,7 +57,7 @@ class TradingSystem:
         self.config = {
             # 🔧 أساسي
             'APP_NAME': config('APP_NAME', default='TradingSignalProcessor'),
-            'APP_VERSION': config('APP_VERSION', default='8.5.0'),
+            'APP_VERSION': config('APP_VERSION', default='8.6.0'),
             'DEBUG': config('DEBUG', default=False, cast=bool),
             'LOG_LEVEL': config('LOG_LEVEL', default='INFO'),
             'LOG_FILE': config('LOG_FILE', default='app.log'),
@@ -478,7 +479,7 @@ class TradingSystem:
         return self.handle_general_signal(signal_data)
 
     def parse_signal(self, raw_signal):
-        """تحليل محسّن لنص الإشارة مع الحفاظ على النص الأصلي تماماً"""
+        """تحليل محسّن لنص الإشارة مع إصلاح التنسيق"""
         try:
             text = raw_signal.strip()
             if not text:
@@ -486,49 +487,54 @@ class TradingSystem:
                 
             print(f"🔍 [تحليل] نص الإشارة الخام: '{text}'")
             
-            # النمط الأساسي: Ticker : XYZ Signal : ABC Open : 123 Close : 456
-            pattern = r'Ticker\s*:\s*(.+?)\s+Signal\s*:\s*(.+?)\s+Open\s*:\s*(.+?)\s+Close\s*:\s*(.+)'
+            # النمط الأساسي المثبت: Ticker : XYZ Signal : ABC
+            pattern = r'Ticker\s*:\s*(.+?)\s+Signal\s*:\s*(.+)'
             m = re.match(pattern, text)
             if m:
-                ticker, signal_type, open_price, close_price = m.groups()
+                ticker, signal_type = m.groups()
                 print(f"✅ [تحليل] تطابق النمط الأساسي: {ticker} -> '{signal_type}'")
-            else:
-                # إذا لم يتطابق مع النمط الأساسي، افترض أن النص كله هو signal_type
-                # واستخدم رمز افتراضي أو استخرج الرمز من البداية
-                if ' ' in text:
-                    # افترض أن أول كلمة هي الرمز والباقي هو الإشارة
-                    parts = text.split(' ', 1)
-                    if len(parts) == 2:
-                        ticker, signal_type = parts[0], parts[1]
-                        print(f"🔄 [تحليل] تقسيم النص: {ticker} -> '{signal_type}'")
-                    else:
-                        ticker = "UNKNOWN"
-                        signal_type = text
-                else:
-                    ticker = "UNKNOWN"
-                    signal_type = text
-                    print(f"⚠️ [تحليل] نص بسيط: '{signal_type}'")
+                
+                # تنظيف الإشارة من أي فواصل زائدة أو رموز
+                signal_type = signal_type.strip()
+                # إزالة أي أسطر جديدة أو مسافات زائدة
+                signal_type = re.sub(r'\s+', ' ', signal_type)
+                # إزالة \n إن وجدت
+                signal_type = signal_type.replace('\n', '')
+                
+                result = {
+                    'ticker': ticker.strip(),
+                    'signal_type': signal_type,
+                    'original_signal': signal_type,
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'source': 'TradingView'
+                }
+                print(f"✅ [تحليل] نتيجة التحليل المصححة: {result}")
+                return result
+            
+            # النمط الثاني: XYZ signal_name (بدون Ticker : و Signal :)
+            pattern2 = r'([A-Za-z0-9]+)\s+(.+)'
+            m2 = re.match(pattern2, text)
+            if m2:
+                ticker, signal_type = m2.groups()
+                print(f"✅ [تحليل] تطابق النمط الثاني: {ticker} -> '{signal_type}'")
+                return {
+                    'ticker': ticker.strip(),
+                    'signal_type': signal_type.strip(),
+                    'original_signal': signal_type.strip(),
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'source': 'TradingView'
+                }
 
-            # تنظيف NaN
-            s_lower = signal_type.lower()
-            if 'nan' in s_lower:
-                if 'bullish' in s_lower:
-                    signal_type = 'bullish_trend'
-                elif 'bearish' in s_lower:
-                    signal_type = 'bearish_trend'
-                else:
-                    return None
-
-            result = {
-                'ticker': ticker.strip(),
-                'signal_type': signal_type.strip(),  # كما هي بدون تعديل
-                'original_signal': signal_type.strip(),  # حفظ الإشارة الأصلية
+            # إذا لم يتطابق مع أي نمط، افترض أن النص كله هو signal_type
+            print(f"⚠️ [تحليل] نص بسيط: '{text}'")
+            return {
+                'ticker': "UNKNOWN",
+                'signal_type': text,
+                'original_signal': text,
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'source': 'TradingView'
             }
-            print(f"✅ [تحليل] نتيجة التحليل: {result}")
-            return result
-            
+                
         except Exception as e:
             self.logger.error(f"خطأ في تحليل الإشارة: {e}")
             print(f"❌ [تحليل] خطأ: {e}")
