@@ -6,6 +6,7 @@ AbuRayan_Bot_V8.9_Controlled_Trades.py
 - التحكم بعدد الصفقات لكل رمز بناء على إعدادات .env
 - نظام مطابقة مرن مع البحث بالكلمات المفتاحية
 - إدارة اتجاه منفصل لكل رمز
+- قبول جميع عناوين IP بدون قيود
 """
 
 import os
@@ -45,6 +46,7 @@ class TradingSystem:
         print(f"🎯 نظام اتجاه منفصل لكل رمز: مفعّل")
         print(f"🔒 منع الصفقات ضد الاتجاه: {'مفعّل' if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] else 'معطل'}")
         print(f"🎯 نظام المطابقة المرن: مفعّل")
+        print(f"🌐 قبول جميع عناوين IP: مفعّل")
 
     # =============================
     # الإعدادات والتهيئة
@@ -87,8 +89,8 @@ class TradingSystem:
             'SEND_BULLISH_SIGNALS': config('SEND_BULLISH_SIGNALS', default=True, cast=bool),
             'SEND_BEARISH_SIGNALS': config('SEND_BEARISH_SIGNALS', default=True, cast=bool),
 
-            # 🔐 إعدادات الأمان
-            'ALLOWED_IPS': config('ALLOWED_IPS', default='')
+            # 🔐 إعدادات الأمان - قبول جميع IPs
+            'ALLOWED_IPS': config('ALLOWED_IPS', default='')  # فارغ يعني قبول الجميع
         }
 
         self.port = config('PORT', default=10000, cast=int)
@@ -216,7 +218,7 @@ class TradingSystem:
         self.logger.addHandler(sh)
 
     # =============================
-    # الأمان والتحقق
+    # الأمان والتحقق - مقبول لجميع IPs
     # =============================
 
     def safe_get_token(self, token_name):
@@ -235,26 +237,11 @@ class TradingSystem:
         return token
 
     def validate_signal_source(self, request):
-        """التحقق من مصدر الإشارة بناء على IP المسموح به"""
-        try:
-            allowed_ips = self.config['ALLOWED_IPS']
-            if not allowed_ips:
-                return True
-
-            client_ip = self.get_client_ip(request)
-            allowed_list = [ip.strip() for ip in allowed_ips.split(',') if ip.strip()]
-            
-            if client_ip in allowed_list:
-                print(f"✅ IP مصرح: {client_ip}")
-                return True
-            else:
-                print(f"🚫 IP غير مصرح: {client_ip} - المسموح: {allowed_list}")
-                self.logger.warning(f"محاولة وصول من IP غير مصرح: {client_ip}")
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"خطأ في التحقق من IP المصدر: {e}")
-            return False
+        """التحقق من مصدر الإشارة - مقبول لجميع IPs"""
+        # ✅ قبول جميع عناوين IP بدون قيود
+        client_ip = self.get_client_ip(request)
+        print(f"✅ قبول الإشارة من IP: {client_ip}")
+        return True  # دائماً نرجع True لقبول جميع العناوين
 
     def get_client_ip(self, request):
         """استخراج IP العميل الحقيقي مع دعم reverse proxy"""
@@ -324,6 +311,9 @@ class TradingSystem:
         print(f"   MAX_TRADES_PER_SYMBOL: {self.config['MAX_TRADES_PER_SYMBOL']} (لكل رمز)")
         print(f"   REQUIRED_CONFIRMATIONS: {self.config['REQUIRED_CONFIRMATIONS']}")
         print(f"   RESPECT_TREND_FOR_REGULAR_TRADES: {self.config['RESPECT_TREND_FOR_REGULAR_TRADES']}")
+
+        print("\n🔐 إعدادات الأمان:")
+        print(f"   ✅ قبول جميع عناوين IP: مفعّل")
 
         print("\n🔍 فحص إعدادات Telegram:")
         print(f"   TELEGRAM_ENABLED: {self.config['TELEGRAM_ENABLED']}")
@@ -440,8 +430,9 @@ class TradingSystem:
     # =============================
     def handle_webhook(self, request):
         try:
-            if not self.validate_signal_source(request):
-                return jsonify({"status": "error", "message": "مصدر غير مصرح"}), 403
+            # ✅ قبول جميع IPs بدون تحقق
+            client_ip = self.get_client_ip(request)
+            print(f"🌐 قبول طلب من IP: {client_ip}")
 
             raw_signal = self.extract_signal_data(request)
             
@@ -451,7 +442,6 @@ class TradingSystem:
             if not raw_signal:
                 return jsonify({"status": "error", "message": "إشارة فارغة"}), 400
 
-            client_ip = self.get_client_ip(request)
             self.logger.info(f"إشارة مستلمة من {client_ip}: {raw_signal}")
             success = self.process_signal(raw_signal)
 
