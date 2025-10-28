@@ -7,6 +7,7 @@ AbuRayan_Bot_V8.9_Controlled_Trades.py
 - نظام مطابقة مرن مع البحث بالكلمات المفتاحية
 - إدارة اتجاه منفصل لكل رمز
 - قبول جميع عناوين IP بدون قيود
+- إشعارات الاتجاه ترسل فقط عند التغيير
 """
 
 import os
@@ -47,6 +48,7 @@ class TradingSystem:
         print(f"🔒 منع الصفقات ضد الاتجاه: {'مفعّل' if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] else 'معطل'}")
         print(f"🎯 نظام المطابقة المرن: مفعّل")
         print(f"🌐 قبول جميع عناوين IP: مفعّل")
+        print(f"🔄 إشعارات الاتجاه: ترسل فقط عند التغيير")
 
     # =============================
     # الإعدادات والتهيئة
@@ -74,7 +76,7 @@ class TradingSystem:
             # ⚙️ التأكيد وإدارة الصفقات
             'REQUIRED_CONFIRMATIONS': config('REQUIRED_CONFIRMATIONS', default=3, cast=int),
             'CONFIRMATION_TIMEOUT': config('CONFIRMATION_TIMEOUT', default=1200, cast=int),
-            'CONFIRMATION_WINDOW': config('CONFIRMATION_WINDOW', default=1200, cast=int),
+            'CONFIRMATION_WINDOW': config('CONFIRMATION_TIMEOUT', default=1200, cast=int),
             'MAX_OPEN_TRADES': config('MAX_OPEN_TRADES', default=10, cast=int),
             'MAX_TRADES_PER_SYMBOL': config('MAX_TRADES_PER_SYMBOL', default=1, cast=int),
             'RESPECT_TREND_FOR_REGULAR_TRADES': config('RESPECT_TREND_FOR_REGULAR_TRADES', default=True, cast=bool),
@@ -314,6 +316,9 @@ class TradingSystem:
 
         print("\n🔐 إعدادات الأمان:")
         print(f"   ✅ قبول جميع عناوين IP: مفعّل")
+
+        print("\n🔔 إعدادات الإشعارات:")
+        print(f"   📊 إشعارات الاتجاه: ترسل فقط عند التغيير")
 
         print("\n🔍 فحص إعدادات Telegram:")
         print(f"   TELEGRAM_ENABLED: {self.config['TELEGRAM_ENABLED']}")
@@ -651,7 +656,7 @@ class TradingSystem:
     # معالجات حسب الفئة
     # =============================
     def handle_trend_signal(self, signal_data):
-        """معالجة محسنة لإشارات الاتجاه"""
+        """معالجة محسنة لإشارات الاتجاه - ترسل فقط عند تغيير الاتجاه"""
         symbol = signal_data['ticker']
         original_signal = signal_data.get('original_signal', signal_data['signal_type'])
         s = original_signal.lower()
@@ -670,29 +675,42 @@ class TradingSystem:
 
         current_trend = self.symbol_trends.get(symbol)
         
-        # تحديث اتجاه الرمز
-        self.symbol_trends[symbol] = new_trend
-        changed = current_trend != new_trend
+        # 🔥 الإصلاح: إرسال الإشعارات فقط عند تغيير الاتجاه
+        if current_trend == new_trend:
+            print(f"🔄 [اتجاه] تجاهل إشارة اتجاه مكررة: {symbol} لا يزال {current_trend}")
+            return True  # نرجع True لأن الإشارة صحيحة ولكن مكررة
         
-        print(f"🔍 [اتجاه] {symbol}: الحالي={current_trend}, الجديد={new_trend}, تغيير={changed}")
+        # تحديث اتجاه الرمز فقط إذا تغير
+        self.symbol_trends[symbol] = new_trend
+        changed = True
+        
+        print(f"🔍 [اتجاه] {symbol}: تغيير اتجاه من {current_trend} إلى {new_trend}")
 
-        # إرسال إشعار الاتجاه
+        # إرسال إشعار الاتجاه فقط عند التغيير
         msg = self.format_trend_message(signal_data, trend_icon, trend_text)
+        
+        telegram_sent = False
+        external_sent = False
         
         if self.should_send_message('trend', signal_data):
             telegram_sent = self.send_telegram(msg)
             if telegram_sent:
-                print(f"✅ [Telegram] تم إرسال إشعار اتجاه {symbol}: {new_trend}")
+                print(f"✅ [Telegram] تم إرسال إشعار تغيير اتجاه {symbol}: {new_trend}")
         
         external_sent = self.send_to_external_server_with_retry(msg, 'trend')
         if external_sent:
-            print(f"✅ [الخادم] تم إرسال إشعار اتجاه {symbol}: {new_trend}")
+            print(f"✅ [الخادم] تم إرسال إشعار تغيير اتجاه {symbol}: {new_trend}")
         
         self.last_trend_notifications[symbol] = new_trend
         self.last_trend_notified_at[symbol] = datetime.now()
-        self.logger.info(f"إشعار اتجاه {symbol}: {new_trend} (تغيير: {changed})")
+        self.logger.info(f"إشعار تغيير اتجاه {symbol}: من {current_trend} إلى {new_trend}")
 
         return True
+
+    def handle_trend_confirmation(self, signal_data):
+        """معالجة إشارات تأكيد الاتجاه"""
+        # نفس السلوك - إرسال فقط عند التغيير
+        return self.handle_trend_signal(signal_data)
 
     def handle_entry_signal(self, signal_data, signal_category):
         """معالجة محسنة لإشارات الدخول مع التحكم الكامل بعدد الصفقات"""
@@ -883,12 +901,12 @@ class TradingSystem:
         symbol = signal_data['ticker']
         signal = signal_data['signal_type']
         ts = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
-        return f"""☰☰☰ 📊 الاتجاه العام ☰☰☰
+        return f"""☰☰☰ 📊 تغيير الاتجاه ☰☰☰
 ┏━━━━━━━━━━━━━━━━━━━━
 ┃ 💰 الرمز: {symbol}
 ┃ 📈 الاتجاه: {trend_icon} {trend_text}
 ┃ 📋 الإشارة: {signal}
-┃ 🔄 الحالة: الاتجاه العام محدث
+┃ 🔄 الحالة: تغيير اتجاه
 ┗━━━━━━━━━━━━━━━━━━━━
 🕐 {ts}"""
 
