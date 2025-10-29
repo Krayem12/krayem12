@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 AbuRayan_Bot_V8.9_Controlled_Trades.py
-نظام معالجة إشارات التداول - تحكم كامل بعدد الصفقات مع استراتيجية المجموعتين
+نظام معالجة إشارات التداول - تحكم كامل بعدد الصفقات مع استراتيجية المجموعتين - بدون قيود IP
 """
 
 import os
@@ -26,7 +26,7 @@ load_dotenv()
 
 
 class TradingSystem:
-    """النظام الرئيسي المدمج لإشارات التداول مع تحكم كامل في الصفقات واستراتيجية المجموعتين"""
+    """النظام الرئيسي المدمج لإشارات التداول مع تحكم كامل في الصفقات واستراتيجية المجموعتين - بدون قيود IP"""
 
     def __init__(self):
         print("🚀 بدء تهيئة نظام التداول...")
@@ -37,6 +37,7 @@ class TradingSystem:
         self.check_settings()
 
         print(f"🚀 نظام معالجة الإشارات جاهز - المنفذ {self.port}")
+        print(f"🔓 وضع الأمان: معطل - يستقبل من جميع الـ IPs")
         print(f"✅ التأكيد المطلوب: {self.config['REQUIRED_CONFIRMATIONS']} إشارات مختلفة من نفس المجموعة")
         print(f"📊 الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
         print(f"🎯 الحد الأقصى لكل رمز: {self.config['MAX_TRADES_PER_SYMBOL']}")
@@ -96,9 +97,6 @@ class TradingSystem:
             'SEND_GENERAL_MESSAGES': config('SEND_GENERAL_MESSAGES', default=False, cast=bool),
             'SEND_BULLISH_SIGNALS': config('SEND_BULLISH_SIGNALS', default=True, cast=bool),
             'SEND_BEARISH_SIGNALS': config('SEND_BEARISH_SIGNALS', default=True, cast=bool),
-
-            # 🔐 إعدادات الأمان
-            'ALLOWED_IPS': config('ALLOWED_IPS', default=''),
         }
 
         self.port = config('PORT', default=10000, cast=int)
@@ -274,7 +272,7 @@ class TradingSystem:
         self.logger.addHandler(sh)
 
     # =============================
-    # الأمان والتحقق
+    # الأمان والتحقق - بدون قيود IP
     # =============================
 
     def safe_get_token(self, token_name):
@@ -292,14 +290,8 @@ class TradingSystem:
             
         return token
 
-    def validate_signal_source(self, request):
-        """التحقق من مصدر الإشارة - مقبول لجميع IPs"""
-        client_ip = self.get_client_ip(request)
-        print(f"✅ قبول الإشارة من IP: {client_ip}")
-        return True
-
     def get_client_ip(self, request):
-        """استخراج IP العميل الحقيقي مع دعم reverse proxy"""
+        """استخراج IP العميل الحقيقي مع دعم reverse proxy - للlogging فقط"""
         if request.headers.get('X-Forwarded-For'):
             ip = request.headers['X-Forwarded-For'].split(',')[0].strip()
             return ip
@@ -307,24 +299,13 @@ class TradingSystem:
         return request.remote_addr or 'UNKNOWN'
 
     def validate_signal_content(self, raw_signal):
-        """التحقق من محتوى الإشارة لمنع الهجمات"""
+        """التحقق الأساسي من محتوى الإشارة"""
         if not raw_signal or len(raw_signal.strip()) == 0:
             return False
             
         if len(raw_signal) > 10000:
             self.logger.warning(f"إشارة كبيرة جداً: {len(raw_signal)} حرف")
             return False
-            
-        injection_patterns = [
-            r';.*DROP', r';.*DELETE', r';.*UPDATE',
-            r'<script>', r'javascript:', r'onload=', r'onerror='
-        ]
-        
-        signal_lower = raw_signal.lower()
-        for pattern in injection_patterns:
-            if re.search(pattern, signal_lower, re.IGNORECASE):
-                self.logger.warning(f"محتوى خطير مكتشف في الإشارة: {pattern}")
-                return False
                 
         return True
 
@@ -334,6 +315,9 @@ class TradingSystem:
     def check_settings(self):
         """فحص شامل للإعدادات"""
         print("\n🔍 فحص الإعدادات:")
+        
+        print("🔓 إعدادات الأمان:")
+        print(f"   • قبول الإشارات من: جميع الـ IPs (بدون قيود)")
         
         print("📊 إدارة الصفقات:")
         print(f"   • الحد الأقصى للصفقات: {self.config['MAX_OPEN_TRADES']}")
@@ -410,7 +394,8 @@ class TradingSystem:
                 "status": "active",
                 "service": self.config['APP_NAME'],
                 "version": self.config['APP_VERSION'],
-                "port": self.port
+                "port": self.port,
+                "security": "disabled - accepts all IPs"
             })
 
         @self.app.route('/health')
@@ -445,27 +430,25 @@ class TradingSystem:
             "pending_groups": len(self.pending_signals),
             'trends': self.symbol_trends,
             "signal_history_count": len(self.signal_history),
-            "dual_confirmation_strategy": self.config['DUAL_CONFIRMATION_STRATEGY']
+            "dual_confirmation_strategy": self.config['DUAL_CONFIRMATION_STRATEGY'],
+            "security": "disabled - accepts all IPs"
         }
 
     # =============================
-    # معالجة الإشارات
+    # معالجة الإشارات - بدون قيود IP
     # =============================
     def handle_webhook(self, request):
-        """معالجة طلبات Webhook"""
+        """معالجة طلبات Webhook - بدون قيود أمان"""
         try:
             client_ip = self.get_client_ip(request)
-            print(f"🌐 إشارة مستلمة من IP: {client_ip}")
+            print(f"🌐 إشارة مستلمة من IP: {client_ip} - مقبولة بدون قيود")
 
             raw_signal = self.extract_signal_data(request)
             
-            if not self.validate_signal_content(raw_signal):
-                return jsonify({"status": "error", "message": "محتوى الإشارة غير صالح"}), 400
-                
-            if not raw_signal:
+            if not raw_signal or len(raw_signal.strip()) == 0:
                 return jsonify({"status": "error", "message": "إشارة فارغة"}), 400
 
-            self.logger.info(f"إشارة مستلمة: {raw_signal}")
+            self.logger.info(f"📥 إشارة مستلمة من {client_ip}: {raw_signal}")
             
             # تسجيل الإشارة في التاريخ
             self.record_signal_history(raw_signal, client_ip)
@@ -473,12 +456,12 @@ class TradingSystem:
             success = self.process_signal(raw_signal)
 
             if success:
-                return jsonify({"status": "success", "message": "ok"})
+                return jsonify({"status": "success", "message": "تم معالجة الإشارة بنجاح"})
             else:
                 return jsonify({"status": "error", "message": "لم تُفتح صفقة/لم تُرسل رسالة"}), 400
 
         except Exception as e:
-            self.logger.error(f"خطأ في Webhook: {e}")
+            self.logger.error(f"❌ خطأ في Webhook: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
 
     def record_signal_history(self, raw_signal, client_ip):
@@ -670,7 +653,6 @@ class TradingSystem:
         """الحصول على جميع الصفقات النشطة لرمز معين"""
         active_trades = [trade for trade in self.active_trades.values() 
                 if trade['ticker'].upper() == symbol.upper() and trade['status'] == 'OPEN']
-        print(f"🔧 [تصحيح] في get_active_trades_for_symbol، الرمز: {symbol}, العدد: {len(active_trades)}")
         return active_trades
 
     def find_active_trade(self, ticker):
@@ -694,7 +676,6 @@ class TradingSystem:
     def close_all_trades_for_symbol(self, symbol, reason="تغيير الاتجاه"):
         """إغلاق جميع الصفقات المفتوحة للرمز"""
         active_trades = self.get_active_trades_for_symbol(symbol)
-        print(f"🔧 [تصحيح] في close_all_trades_for_symbol، الرمز: {symbol}, عدد الصفقات النشطة: {len(active_trades)}")
         
         if not active_trades:
             print(f"📭 لا توجد صفقات مفتوحة للرمز {symbol}")
@@ -755,17 +736,11 @@ class TradingSystem:
             print(f"🔄 [اتجاه] تجاهل إشارة اتجاه مكررة: {symbol} لا يزال {current_trend}")
             return True
         
-        print(f"🔧 [تصحيح] قبل إغلاق الصفقات، الإعداد RESET_TRADES_ON_TREND_CHANGE: {self.config['RESET_TRADES_ON_TREND_CHANGE']}")
-        
         # 🔥 إغلاق جميع الصفقات المفتوحة للرمز إذا كان الإعداد مفعلاً
         if self.config['RESET_TRADES_ON_TREND_CHANGE']:
-            print(f"🔧 [تصحيح] الإعداد مفعل، جاري إغلاق الصفقات للرمز {symbol}")
             closed_trades = self.close_all_trades_for_symbol(symbol, f"تغيير الاتجاه من {current_trend} إلى {new_trend}")
-            print(f"🔧 [تصحيح] عدد الصفقات المغلقة: {closed_trades}")
             if closed_trades > 0:
                 print(f"🔻 تم إغلاق {closed_trades} صفقة بسبب تغيير الاتجاه")
-        else:
-            print(f"🔧 [تصحيح] الإعداد معطل، لن يتم إغلاق الصفقات")
         
         # تحديث اتجاه الرمز
         self.symbol_trends[symbol] = new_trend
