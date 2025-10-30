@@ -24,37 +24,23 @@ from decouple import config as decouple_config
 # =============================
 
 def load_environment_variables():
-    """تحميل متغيرات البيئة من ملف .env في مجلد الكود أولاً"""
-    # الحصول على المسار الحالي للملف
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    env_path = os.path.join(current_dir, '.env')
+    """تحميل متغيرات البيئة من environment variables فقط"""
+    print("🔍 جاري تحميل الإعدادات من environment variables...")
     
-    print(f"🔍 البحث عن ملف .env في: {env_path}")
+    # إزالة أي إعدادات سابقة لضمان استخدام environment variables الحالية
+    for key in list(os.environ.keys()):
+        if key.startswith(('APP_', 'TELEGRAM_', 'EXTERNAL_', 'REQUIRED_', 'MAX_', 'RESPECT_', 
+                         'RESET_', 'DUAL_', 'SEND_', 'ALLOWED_', 'PORT', 'LOG_', 'DEBUG')):
+            del os.environ[key]
     
-    # محاولة تحميل من ملف .env في مجلد الكود
-    if os.path.exists(env_path):
-        print(f"✅ تم العثور على ملف .env في مجلد الكود")
-        # إفراغ environment variables الحالية أولاً لضمان استخدام ملف .env
-        for key in list(os.environ.keys()):
-            if key.startswith(('APP_', 'TELEGRAM_', 'EXTERNAL_', 'REQUIRED_', 'MAX_', 'RESPECT_', 
-                             'RESET_', 'DUAL_', 'SEND_', 'ALLOWED_', 'PORT', 'LOG_', 'DEBUG')):
-                del os.environ[key]
-        
-        # تحميل من ملف .env
-        load_dotenv(env_path, override=True)
-        print("✅ تم تحميل الإعدادات من ملف .env في مجلد الكود")
+    try:
+        # تحميل من environment variables مباشرة
+        load_dotenv(override=True)
+        print("✅ تم تحميل الإعدادات من environment variables بنجاح")
         return True
-    else:
-        # إذا لم يوجد في مجلد الكود، استخدام environment variables
-        print("❌ لم يتم العثور على ملف .env في مجلد الكود")
-        print("📁 جاري استخدام environment variables...")
-        try:
-            load_dotenv()  # يحاول تحميل من المسار الافتراضي
-            print("✅ تم تحميل الإعدادات من environment variables")
-            return True
-        except Exception as e:
-            print(f"❌ فشل تحميل الإعدادات: {e}")
-            return False
+    except Exception as e:
+        print(f"❌ فشل تحميل الإعدادات من environment variables: {e}")
+        return False
 
 # تحميل الإعدادات عند استيراد الملف
 load_environment_variables()
@@ -85,22 +71,13 @@ class TradingSystem:
             print(f"   • وقت التأكيد: {self.config['DUAL_CONFIRMATION_TIMEOUT']} ثانية")
 
     def get_config_value(self, key, default=None, cast_type=str):
-        """الحصول على قيمة الإعداد من .env أو environment مع معالجة الأخطاء"""
+        """الحصول على قيمة الإعداد من environment variables فقط"""
         try:
-            # محاولة القراءة من environment variables
+            # القراءة من environment variables مباشرة
             value = os.environ.get(key)
             
             if value is not None:
-                # طباعة مصدر القيمة للمساعدة في التشخيص
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                env_path = os.path.join(current_dir, '.env')
-                
-                if os.path.exists(env_path):
-                    source = "ملف .env في مجلد الكود"
-                else:
-                    source = "environment variables"
-                
-                print(f"   📖 {key} = '{value}' (مصدر: {source})")
+                print(f"   📖 {key} = '{value}' (مصدر: environment variables)")
                 
                 # معالجة أنواع البيانات
                 if cast_type == bool:
@@ -129,17 +106,10 @@ class TradingSystem:
     # الإعدادات والتهيئة - بتسلسل صحيح
     # =============================
     def setup_config(self):
-        """إعداد التكوين الكامل من .env أو environment variables"""
-        print("⚙️ جاري تحميل الإعدادات...")
+        """إعداد التكوين الكامل من environment variables فقط"""
+        print("⚙️ جاري تحميل الإعدادات من environment variables...")
         
-        # التحقق من مصدر الإعدادات أولاً
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        env_path = os.path.join(current_dir, '.env')
-        
-        if os.path.exists(env_path):
-            print("📍 مصدر الإعدادات: ملف .env في مجلد الكود")
-        else:
-            print("📍 مصدر الإعدادات: environment variables")
+        print("📍 مصدر الإعدادات: environment variables فقط")
         
         self.config = {
             # 🔧 أساسي
@@ -986,6 +956,22 @@ class TradingSystem:
             group['signals_data'].append(signal_data)
             group['updated_at'] = now
             self.logger.info(f"إشارة فريدة للمجموعة {group_type}: '{signal_data['signal_type']}'")
+            
+            # 🔥 التعديل: التحقق من الاتجاه فوراً عند إضافة إشارة جديدة
+            if self.config['RESPECT_TREND_FOR_REGULAR_TRADES']:
+                symbol_trend = self.symbol_trends.get(symbol)
+                if symbol_trend:
+                    # تحديد اتجاه الإشارة الحالية
+                    is_bullish_signal = signal_category in ['entry_bullish', 'entry_bullish1']
+                    is_bearish_signal = signal_category in ['entry_bearish', 'entry_bearish1']
+                    
+                    if (is_bullish_signal and symbol_trend != 'BULLISH') or \
+                       (is_bearish_signal and symbol_trend != 'BEARISH'):
+                        print(f"❌ [اتجاه] رفض إشارة: {signal_category} ضد اتجاه {symbol_trend} للرمز {symbol}")
+                        # إزالة الإشارة المضافة حديثاً
+                        group['unique_signals'].remove(clean_type)
+                        group['signals_data'].pop()
+                        return True
         else:
             self.logger.info(f"تجاهل إشارة مكررة للمجموعة {group_type}: '{signal_data['signal_type']}'")
             return True
@@ -998,14 +984,30 @@ class TradingSystem:
         # تحديد الفئة الأساسية
         if 'bullish' in signal_category:
             base_category = 'entry_bullish'
+            expected_trend = 'BULLISH'
         else:
             base_category = 'entry_bearish'
+            expected_trend = 'BEARISH'
 
         group1_key = f"{symbol}_{base_category}_group1"
-        group2_key = f"{symbol}_{base_category}1_group2"  # 🔥 استخدام الفئة الثانية المناسبة
+        group2_key = f"{symbol}_{base_category}1_group2"
 
         group1_ready = False
         group2_ready = False
+
+        # 🔥 التعديل: التحقق النهائي من الاتجاه قبل فتح الصفقة
+        if self.config['RESPECT_TREND_FOR_REGULAR_TRADES']:
+            symbol_trend = self.symbol_trends.get(symbol)
+            if symbol_trend and symbol_trend != expected_trend:
+                print(f"❌ [اتجاه] رفض فتح صفقة: الاتجاه الحالي {symbol_trend} لا يتطابق مع الاتجاه المطلوب {expected_trend}")
+                
+                # تنظيف المجموعتين لأن الصفقة مرفوضة
+                if group1_key in self.pending_signals:
+                    del self.pending_signals[group1_key]
+                if group2_key in self.pending_signals:
+                    del self.pending_signals[group2_key]
+                
+                return False
 
         # التحقق من المجموعة الأولى
         if group1_key in self.pending_signals:
@@ -1042,6 +1044,20 @@ class TradingSystem:
         """فتح صفقة مؤكدة من المجموعتين"""
         group1_data = self.pending_signals[group1_key]
         group2_data = self.pending_signals[group2_key]
+
+        # 🔥 التحقق النهائي من الاتجاه قبل فتح الصفقة
+        if self.config['RESPECT_TREND_FOR_REGULAR_TRADES']:
+            symbol_trend = self.symbol_trends.get(symbol)
+            expected_trend = 'BULLISH' if base_category == 'entry_bullish' else 'BEARISH'
+            
+            if symbol_trend and symbol_trend != expected_trend:
+                print(f"❌ [اتجاه] رفض فتح صفقة: الاتجاه الحالي {symbol_trend} لا يتطابق مع الإشارة {expected_trend}")
+                
+                # تنظيف المجموعتين
+                del self.pending_signals[group1_key]
+                del self.pending_signals[group2_key]
+                
+                return False
 
         trade_id = str(uuid.uuid4())[:8]
         direction = 'CALL' if base_category == 'entry_bullish' else 'PUT'
