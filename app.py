@@ -3,7 +3,6 @@
 """
 AbuRayan_Bot_V8.9_Controlled_Trades.py
 نظام معالجة إشارات التداول - تحكم كامل بعدد الصفقات مع استراتيجية المجموعتين
-متوافق مع Render
 """
 
 import os
@@ -102,8 +101,7 @@ class TradingSystem:
             'ALLOWED_IPS': config('ALLOWED_IPS', default=''),
         }
 
-        # 🔥 التعديل: استخدام PORT من متغيرات البيئة على Render
-        self.port = int(os.environ.get('PORT', 10000))
+        self.port = config('PORT', default=10000, cast=int)
         print(f"📡 المنفذ المضبوط: {self.port}")
 
         # 🔄 الترتيب الصحيح: أولاً تحميل الإشارات، ثم الكلمات المفتاحية، ثم الفهرس
@@ -250,6 +248,7 @@ class TradingSystem:
     def setup_logging(self):
         """إعداد نظام التسجيل"""
         print("📝 جاري إعداد نظام التسجيل...")
+        logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger('trading_system')
         self.logger.setLevel(getattr(logging, self.config['LOG_LEVEL'], logging.INFO))
         
@@ -260,9 +259,13 @@ class TradingSystem:
         fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         
         # 🔥 إصلاح مشكلة ملف السجل - استخدام المسار الحالي بدلاً من system32
-        log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.config['LOG_FILE'])
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        log_file_path = os.path.join(current_dir, self.config['LOG_FILE'])
         
         try:
+            # التأكد من وجود المجلد
+            os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+            
             fh = logging.FileHandler(log_file_path, encoding='utf-8')
             fh.setFormatter(fmt)
             self.logger.addHandler(fh)
@@ -384,7 +387,8 @@ class TradingSystem:
             url = f"https://api.telegram.org/bot{token}/getMe"
             response = requests.get(url, timeout=10)
             return response.status_code == 200
-        except Exception:
+        except Exception as e:
+            print(f"❌ فشل اختبار Telegram: {e}")
             return False
 
     def test_external_server_connection(self):
@@ -398,7 +402,8 @@ class TradingSystem:
                 verify=False
             )
             return response.status_code in (200, 201, 204)
-        except Exception:
+        except Exception as e:
+            print(f"❌ فشل اختبار الخادم الخارجي: {e}")
             return False
 
     # =============================
@@ -672,7 +677,6 @@ class TradingSystem:
         """الحصول على جميع الصفقات النشطة لرمز معين"""
         active_trades = [trade for trade in self.active_trades.values() 
                 if trade['ticker'].upper() == symbol.upper() and trade['status'] == 'OPEN']
-        print(f"🔧 [تصحيح] في get_active_trades_for_symbol، الرمز: {symbol}, العدد: {len(active_trades)}")
         return active_trades
 
     def find_active_trade(self, ticker):
@@ -696,7 +700,6 @@ class TradingSystem:
     def close_all_trades_for_symbol(self, symbol, reason="تغيير الاتجاه"):
         """إغلاق جميع الصفقات المفتوحة للرمز"""
         active_trades = self.get_active_trades_for_symbol(symbol)
-        print(f"🔧 [تصحيح] في close_all_trades_for_symbol، الرمز: {symbol}, عدد الصفقات النشطة: {len(active_trades)}")
         
         if not active_trades:
             print(f"📭 لا توجد صفقات مفتوحة للرمز {symbol}")
@@ -757,17 +760,13 @@ class TradingSystem:
             print(f"🔄 [اتجاه] تجاهل إشارة اتجاه مكررة: {symbol} لا يزال {current_trend}")
             return True
         
-        print(f"🔧 [تصحيح] قبل إغلاق الصفقات، الإعداد RESET_TRADES_ON_TREND_CHANGE: {self.config['RESET_TRADES_ON_TREND_CHANGE']}")
+        print(f"🔧 [اتجاه] تغيير اتجاه {symbol} من {current_trend} إلى {new_trend}")
         
         # 🔥 إغلاق جميع الصفقات المفتوحة للرمز إذا كان الإعداد مفعلاً
         if self.config['RESET_TRADES_ON_TREND_CHANGE']:
-            print(f"🔧 [تصحيح] الإعداد مفعل، جاري إغلاق الصفقات للرمز {symbol}")
             closed_trades = self.close_all_trades_for_symbol(symbol, f"تغيير الاتجاه من {current_trend} إلى {new_trend}")
-            print(f"🔧 [تصحيح] عدد الصفقات المغلقة: {closed_trades}")
             if closed_trades > 0:
                 print(f"🔻 تم إغلاق {closed_trades} صفقة بسبب تغيير الاتجاه")
-        else:
-            print(f"🔧 [تصحيح] الإعداد معطل، لن يتم إغلاق الصفقات")
         
         # تحديث اتجاه الرمز
         self.symbol_trends[symbol] = new_trend
@@ -1158,20 +1157,13 @@ class TradingSystem:
         return True
 
     # =============================
-    # قوالب الرسائل - التصميم الأصلي
+    # قوالب الرسائل - التصميم الأصلي المطلوب
     # =============================
     def format_trend_message(self, signal_data, trend_icon, trend_text, old_trend, new_trend):
-        """تنسيق رسالة الاتجاه - التصميم الأصلي"""
+        """تنسيق رسالة الاتجاه - التصميم الأصلي المطلوب"""
         symbol = signal_data['ticker']
         signal = signal_data['signal_type']
         timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
-        
-        # إضافة معلومات إغلاق الصفقات إذا كان الإعداد مفعلاً
-        close_info = ""
-        if self.config['RESET_TRADES_ON_TREND_CHANGE']:
-            active_trades = self.get_active_trades_for_symbol(symbol)
-            if active_trades:
-                close_info = f"┃ 🔻 تم إغلاق {len(active_trades)} صفقة\n"
         
         return f"""☰☰☰ 📊 تغيير الاتجاه ☰☰☰
 ┏━━━━━━━━━━━━━━━━━━━━
@@ -1179,32 +1171,11 @@ class TradingSystem:
 ┃ 📈 الاتجاه: {trend_icon} {trend_text}
 ┃ 📋 الإشارة: {signal}
 ┃ 🔄 الحالة: تغيير اتجاه ({old_trend or 'لا يوجد'} → {new_trend})
-{close_info}┗━━━━━━━━━━━━━━━━━━━━
+┗━━━━━━━━━━━━━━━━━━━━
 🕐 {timestamp}"""
 
-    def format_auto_close_message(self, trade, reason):
-        """تنسيق رسالة الإغلاق التلقائي"""
-        symbol = trade['ticker']
-        direction = trade.get('direction', 'CALL')
-        dir_text = '🟢 شراء' if direction == 'CALL' else '🔴 بيع (PUT)'
-        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
-        active_for_symbol = len(self.get_active_trades_for_symbol(symbol))
-        total_active = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
-        
-        return (
-            "⚠️ إغلاق تلقائي للصفقة\n"
-            "┏━━━━━━━━━━━━━━━━━━━━\n"
-            f"┃ 💰 الرمز: {symbol}\n"
-            f"┃ 📝 السبب: {reason}\n"
-            f"┃ 🎯 نوع الصفقة المغلقة: {dir_text}\n"
-            f"┃ 📊 صفقات {symbol} المتبقية: {active_for_symbol}/{self.config['MAX_TRADES_PER_SYMBOL']}\n"
-            f"┃ 📊 الصفقات الإجمالية: {total_active}/{self.config['MAX_OPEN_TRADES']}\n"
-            "┗━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕐 {timestamp}"
-        )
-
     def format_trend_confirmation_message(self, signal_data, trend_icon, trend_text):
-        """تنسيق رسالة تأكيد الاتجاه - تصميم جديد"""
+        """تنسيق رسالة تأكيد الاتجاه - التصميم الأصلي المطلوب"""
         symbol = signal_data['ticker']
         signal = signal_data['signal_type']
         timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
@@ -1220,7 +1191,7 @@ class TradingSystem:
 🕐 {timestamp}"""
 
     def format_entry_message(self, trade_info, pending_data):
-        """تنسيق رسالة الدخول - التصميم الأصلي"""
+        """تنسيق رسالة الدخول - التصميم الأصلي المطلوب"""
         symbol = trade_info['ticker']
         direction = trade_info['direction']
         signal = trade_info['signal_type']
@@ -1263,7 +1234,7 @@ class TradingSystem:
         )
 
     def format_dual_entry_message(self, trade_info, group1_data, group2_data):
-        """تنسيق رسالة الدخول للاستراتيجية المزدوجة"""
+        """تنسيق رسالة الدخول للاستراتيجية المزدوجة - التصميم الأصلي المطلوب"""
         symbol = trade_info['ticker']
         direction = trade_info['direction']
         signal = trade_info['signal_type']
@@ -1315,7 +1286,7 @@ class TradingSystem:
         )
 
     def format_exit_message(self, trade):
-        """تنسيق رسالة الخروج - التصميم الأصلي"""
+        """تنسيق رسالة الخروج - التصميم الأصلي المطلوب"""
         symbol = trade['ticker']
         exit_signal = trade.get('exit_signal', 'غير محدد')
         direction = trade.get('direction', 'CALL')
@@ -1336,8 +1307,29 @@ class TradingSystem:
             f"🕐 {timestamp}"
         )
 
+    def format_auto_close_message(self, trade, reason):
+        """تنسيق رسالة الإغلاق التلقائي - التصميم الأصلي المطلوب"""
+        symbol = trade['ticker']
+        direction = trade.get('direction', 'CALL')
+        dir_text = '🟢 شراء' if direction == 'CALL' else '🔴 بيع (PUT)'
+        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        active_for_symbol = len(self.get_active_trades_for_symbol(symbol))
+        total_active = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
+        
+        return (
+            "⚠️ إغلاق تلقائي للصفقة\n"
+            "┏━━━━━━━━━━━━━━━━━━━━\n"
+            f"┃ 💰 الرمز: {symbol}\n"
+            f"┃ 📝 السبب: {reason}\n"
+            f"┃ 🎯 نوع الصفقة المغلقة: {dir_text}\n"
+            f"┃ 📊 صفقات {symbol} المتبقية: {active_for_symbol}/{self.config['MAX_TRADES_PER_SYMBOL']}\n"
+            f"┃ 📊 الصفقات الإجمالية: {total_active}/{self.config['MAX_OPEN_TRADES']}\n"
+            "┗━━━━━━━━━━━━━━━━━━━━\n"
+            f"🕐 {timestamp}"
+        )
+
     def format_general_message(self, signal_data):
-        """تنسيق الرسائل العامة - التصميم الأصلي"""
+        """تنسيق الرسائل العامة - التصميم الأصلي المطلوب"""
         symbol = signal_data['ticker']
         signal = signal_data['signal_type']
         timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
@@ -1425,14 +1417,23 @@ class TradingSystem:
 
 
 # =============================
-# 🔥 التعديل الرئيسي: تهيئة التطبيق ليكون متوافقاً مع Render
+# تشغيل النظام
 # =============================
-
-# إنشاء النظام وتطبيق Flask
-system = TradingSystem()
-app = system.app
-
-# 🔥 التشغيل المباشر (للتطوير المحلي) أو عبر Gunicorn (لـ Render)
 if __name__ == '__main__':
-    print("🚀 بدء تشغيل نظام التداول...")
-    app.run(host='0.0.0.0', port=system.port)
+    try:
+        print("🚀 بدء تشغيل نظام التداول...")
+        system = TradingSystem()
+        app = system.app
+        
+        print(f"🌐 جاري تشغيل الخادم على المنفذ {system.port}...")
+        print("📡 الخادم يعمل وجاهز لاستقبال الإشارات")
+        print("⏹️  لإيقاف الخادم، اضغط Ctrl+C")
+        
+        app.run(host='0.0.0.0', port=system.port, debug=False)
+        
+    except KeyboardInterrupt:
+        print("\n🛑 إيقاف الخادم...")
+    except Exception as e:
+        print(f"💥 خطأ غير متوقع: {e}")
+        print("🔧 جاري إعادة تشغيل النظام...")
+        time.sleep(5)
