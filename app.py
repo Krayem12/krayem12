@@ -29,16 +29,27 @@ def load_environment_variables():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     env_path = os.path.join(current_dir, '.env')
     
+    print(f"🔍 البحث عن ملف .env في: {env_path}")
+    
     # محاولة تحميل من ملف .env في مجلد الكود
     if os.path.exists(env_path):
-        print(f"📁 جاري تحميل الإعدادات من: {env_path}")
-        load_dotenv(env_path)
+        print(f"✅ تم العثور على ملف .env في مجلد الكود")
+        # إفراغ environment variables الحالية أولاً لضمان استخدام ملف .env
+        for key in list(os.environ.keys()):
+            if key.startswith(('APP_', 'TELEGRAM_', 'EXTERNAL_', 'REQUIRED_', 'MAX_', 'RESPECT_', 
+                             'RESET_', 'DUAL_', 'SEND_', 'ALLOWED_', 'PORT', 'LOG_', 'DEBUG')):
+                del os.environ[key]
+        
+        # تحميل من ملف .env
+        load_dotenv(env_path, override=True)
+        print("✅ تم تحميل الإعدادات من ملف .env في مجلد الكود")
         return True
     else:
-        # إذا لم يوجد في مجلد الكود، حاول تحميل من الموقع الافتراضي
-        print("📁 لم يتم العثور على .env في مجلد الكود، جاري التحقق من المواقع الأخرى...")
+        # إذا لم يوجد في مجلد الكود، استخدام environment variables
+        print("❌ لم يتم العثور على ملف .env في مجلد الكود")
+        print("📁 جاري استخدام environment variables...")
         try:
-            load_dotenv()  # يحاول تحميل من المسار الافتراضي أو environment
+            load_dotenv()  # يحاول تحميل من المسار الافتراضي
             print("✅ تم تحميل الإعدادات من environment variables")
             return True
         except Exception as e:
@@ -80,6 +91,17 @@ class TradingSystem:
             value = os.environ.get(key)
             
             if value is not None:
+                # طباعة مصدر القيمة للمساعدة في التشخيص
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                env_path = os.path.join(current_dir, '.env')
+                
+                if os.path.exists(env_path):
+                    source = "ملف .env في مجلد الكود"
+                else:
+                    source = "environment variables"
+                
+                print(f"   📖 {key} = '{value}' (مصدر: {source})")
+                
                 # معالجة أنواع البيانات
                 if cast_type == bool:
                     if isinstance(value, str):
@@ -96,6 +118,7 @@ class TradingSystem:
                 else:
                     return str(value)
             else:
+                print(f"   ⚠️ {key}: استخدام القيمة الافتراضية '{default}'")
                 return default
                 
         except Exception as e:
@@ -108,6 +131,15 @@ class TradingSystem:
     def setup_config(self):
         """إعداد التكوين الكامل من .env أو environment variables"""
         print("⚙️ جاري تحميل الإعدادات...")
+        
+        # التحقق من مصدر الإعدادات أولاً
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        env_path = os.path.join(current_dir, '.env')
+        
+        if os.path.exists(env_path):
+            print("📍 مصدر الإعدادات: ملف .env في مجلد الكود")
+        else:
+            print("📍 مصدر الإعدادات: environment variables")
         
         self.config = {
             # 🔧 أساسي
@@ -184,6 +216,7 @@ class TradingSystem:
         try:
             signal_str = self.get_config_value(key, '')
             if not signal_str:
+                print(f"   📭 {key}: فارغ")
                 return []
             
             signals = [s.strip() for s in signal_str.split(',') if s.strip()]
