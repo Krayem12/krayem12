@@ -17,12 +17,36 @@ import time
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from decouple import config
+from decouple import config as decouple_config
 
 # =============================
 # تحميل متغيرات البيئة
 # =============================
-load_dotenv()
+
+def load_environment_variables():
+    """تحميل متغيرات البيئة من ملف .env في مجلد الكود أولاً"""
+    # الحصول على المسار الحالي للملف
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.path.join(current_dir, '.env')
+    
+    # محاولة تحميل من ملف .env في مجلد الكود
+    if os.path.exists(env_path):
+        print(f"📁 جاري تحميل الإعدادات من: {env_path}")
+        load_dotenv(env_path)
+        return True
+    else:
+        # إذا لم يوجد في مجلد الكود، حاول تحميل من الموقع الافتراضي
+        print("📁 لم يتم العثور على .env في مجلد الكود، جاري التحقق من المواقع الأخرى...")
+        try:
+            load_dotenv()  # يحاول تحميل من المسار الافتراضي أو environment
+            print("✅ تم تحميل الإعدادات من environment variables")
+            return True
+        except Exception as e:
+            print(f"❌ فشل تحميل الإعدادات: {e}")
+            return False
+
+# تحميل الإعدادات عند استيراد الملف
+load_environment_variables()
 
 
 class TradingSystem:
@@ -49,59 +73,88 @@ class TradingSystem:
             print(f"   • المجموعة الثانية: {self.config['REQUIRED_CONFIRMATIONS_GROUP2']} إشارة")
             print(f"   • وقت التأكيد: {self.config['DUAL_CONFIRMATION_TIMEOUT']} ثانية")
 
+    def get_config_value(self, key, default=None, cast_type=str):
+        """الحصول على قيمة الإعداد من .env أو environment مع معالجة الأخطاء"""
+        try:
+            # محاولة القراءة من environment variables
+            value = os.environ.get(key)
+            
+            if value is not None:
+                # معالجة أنواع البيانات
+                if cast_type == bool:
+                    if isinstance(value, str):
+                        return value.lower() in ('true', '1', 'yes', 'y', 'on')
+                    return bool(value)
+                elif cast_type == int:
+                    return int(value)
+                elif cast_type == float:
+                    return float(value)
+                elif cast_type == list:
+                    if isinstance(value, str):
+                        return [item.strip() for item in value.split(',') if item.strip()]
+                    return value
+                else:
+                    return str(value)
+            else:
+                return default
+                
+        except Exception as e:
+            print(f"⚠️ تحذير: خطأ في قراءة الإعداد {key}: {e}, استخدام القيمة الافتراضية: {default}")
+            return default
+
     # =============================
     # الإعدادات والتهيئة - بتسلسل صحيح
     # =============================
     def setup_config(self):
-        """إعداد التكوين الكامل من .env"""
+        """إعداد التكوين الكامل من .env أو environment variables"""
         print("⚙️ جاري تحميل الإعدادات...")
         
         self.config = {
             # 🔧 أساسي
-            'APP_NAME': config('APP_NAME', default='TradingSignalProcessor'),
-            'APP_VERSION': config('APP_VERSION', default='8.9.0'),
-            'DEBUG': config('DEBUG', default=False, cast=bool),
-            'LOG_LEVEL': config('LOG_LEVEL', default='INFO'),
-            'LOG_FILE': config('LOG_FILE', default='app.log'),
+            'APP_NAME': self.get_config_value('APP_NAME', 'TradingSignalProcessor'),
+            'APP_VERSION': self.get_config_value('APP_VERSION', '8.9.0'),
+            'DEBUG': self.get_config_value('DEBUG', False, bool),
+            'LOG_LEVEL': self.get_config_value('LOG_LEVEL', 'INFO'),
+            'LOG_FILE': self.get_config_value('LOG_FILE', 'app.log'),
 
             # 📱 Telegram
-            'TELEGRAM_ENABLED': config('TELEGRAM_ENABLED', default=True, cast=bool),
-            'TELEGRAM_BOT_TOKEN': config('TELEGRAM_BOT_TOKEN', default='your_bot_token_here'),
-            'TELEGRAM_CHAT_ID': config('TELEGRAM_CHAT_ID', default='your_chat_id_here'),
+            'TELEGRAM_ENABLED': self.get_config_value('TELEGRAM_ENABLED', True, bool),
+            'TELEGRAM_BOT_TOKEN': self.get_config_value('TELEGRAM_BOT_TOKEN', 'your_bot_token_here'),
+            'TELEGRAM_CHAT_ID': self.get_config_value('TELEGRAM_CHAT_ID', 'your_chat_id_here'),
 
             # 🌐 الخادم الخارجي
-            'EXTERNAL_SERVER_ENABLED': config('EXTERNAL_SERVER_ENABLED', default=True, cast=bool),
-            'EXTERNAL_SERVER_URL': config('EXTERNAL_SERVER_URL', default='https://api.example.com/webhook/trading'),
-            'EXTERNAL_SERVER_TOKEN': config('EXTERNAL_SERVER_TOKEN', default=''),
+            'EXTERNAL_SERVER_ENABLED': self.get_config_value('EXTERNAL_SERVER_ENABLED', True, bool),
+            'EXTERNAL_SERVER_URL': self.get_config_value('EXTERNAL_SERVER_URL', 'https://api.example.com/webhook/trading'),
+            'EXTERNAL_SERVER_TOKEN': self.get_config_value('EXTERNAL_SERVER_TOKEN', ''),
 
             # ⚙️ التأكيد وإدارة الصفقات
-            'REQUIRED_CONFIRMATIONS': config('REQUIRED_CONFIRMATIONS', default=3, cast=int),
-            'CONFIRMATION_TIMEOUT': config('CONFIRMATION_TIMEOUT', default=1200, cast=int),
-            'MAX_OPEN_TRADES': config('MAX_OPEN_TRADES', default=10, cast=int),
-            'MAX_TRADES_PER_SYMBOL': config('MAX_TRADES_PER_SYMBOL', default=1, cast=int),
-            'RESPECT_TREND_FOR_REGULAR_TRADES': config('RESPECT_TREND_FOR_REGULAR_TRADES', default=True, cast=bool),
-            'RESET_TRADES_ON_TREND_CHANGE': config('RESET_TRADES_ON_TREND_CHANGE', default=True, cast=bool),
+            'REQUIRED_CONFIRMATIONS': self.get_config_value('REQUIRED_CONFIRMATIONS', 3, int),
+            'CONFIRMATION_TIMEOUT': self.get_config_value('CONFIRMATION_TIMEOUT', 1200, int),
+            'MAX_OPEN_TRADES': self.get_config_value('MAX_OPEN_TRADES', 10, int),
+            'MAX_TRADES_PER_SYMBOL': self.get_config_value('MAX_TRADES_PER_SYMBOL', 1, int),
+            'RESPECT_TREND_FOR_REGULAR_TRADES': self.get_config_value('RESPECT_TREND_FOR_REGULAR_TRADES', True, bool),
+            'RESET_TRADES_ON_TREND_CHANGE': self.get_config_value('RESET_TRADES_ON_TREND_CHANGE', True, bool),
 
             # 🆕 🔥 إعدادات الاستراتيجية المزدوجة - المجموعتين
-            'DUAL_CONFIRMATION_STRATEGY': config('DUAL_CONFIRMATION_STRATEGY', default=False, cast=bool),
-            'REQUIRED_CONFIRMATIONS_GROUP1': config('REQUIRED_CONFIRMATIONS_GROUP1', default=2, cast=int),
-            'REQUIRED_CONFIRMATIONS_GROUP2': config('REQUIRED_CONFIRMATIONS_GROUP2', default=1, cast=int),
-            'DUAL_CONFIRMATION_TIMEOUT': config('DUAL_CONFIRMATION_TIMEOUT', default=1800, cast=int),
+            'DUAL_CONFIRMATION_STRATEGY': self.get_config_value('DUAL_CONFIRMATION_STRATEGY', False, bool),
+            'REQUIRED_CONFIRMATIONS_GROUP1': self.get_config_value('REQUIRED_CONFIRMATIONS_GROUP1', 2, int),
+            'REQUIRED_CONFIRMATIONS_GROUP2': self.get_config_value('REQUIRED_CONFIRMATIONS_GROUP2', 1, int),
+            'DUAL_CONFIRMATION_TIMEOUT': self.get_config_value('DUAL_CONFIRMATION_TIMEOUT', 1800, int),
 
             # 🔔 تحكم الإرسال
-            'SEND_TREND_MESSAGES': config('SEND_TREND_MESSAGES', default=True, cast=bool),
-            'SEND_ENTRY_MESSAGES': config('SEND_ENTRY_MESSAGES', default=True, cast=bool),
-            'SEND_EXIT_MESSAGES': config('SEND_EXIT_MESSAGES', default=True, cast=bool),
-            'SEND_CONFIRMATION_MESSAGES': config('SEND_CONFIRMATION_MESSAGES', default=True, cast=bool),
-            'SEND_GENERAL_MESSAGES': config('SEND_GENERAL_MESSAGES', default=False, cast=bool),
-            'SEND_BULLISH_SIGNALS': config('SEND_BULLISH_SIGNALS', default=True, cast=bool),
-            'SEND_BEARISH_SIGNALS': config('SEND_BEARISH_SIGNALS', default=True, cast=bool),
+            'SEND_TREND_MESSAGES': self.get_config_value('SEND_TREND_MESSAGES', True, bool),
+            'SEND_ENTRY_MESSAGES': self.get_config_value('SEND_ENTRY_MESSAGES', True, bool),
+            'SEND_EXIT_MESSAGES': self.get_config_value('SEND_EXIT_MESSAGES', True, bool),
+            'SEND_CONFIRMATION_MESSAGES': self.get_config_value('SEND_CONFIRMATION_MESSAGES', True, bool),
+            'SEND_GENERAL_MESSAGES': self.get_config_value('SEND_GENERAL_MESSAGES', False, bool),
+            'SEND_BULLISH_SIGNALS': self.get_config_value('SEND_BULLISH_SIGNALS', True, bool),
+            'SEND_BEARISH_SIGNALS': self.get_config_value('SEND_BEARISH_SIGNALS', True, bool),
 
             # 🔐 إعدادات الأمان
-            'ALLOWED_IPS': config('ALLOWED_IPS', default=''),
+            'ALLOWED_IPS': self.get_config_value('ALLOWED_IPS', ''),
         }
 
-        self.port = config('PORT', default=10000, cast=int)
+        self.port = self.get_config_value('PORT', 10000, int)
         print(f"📡 المنفذ المضبوط: {self.port}")
 
         # 🔄 الترتيب الصحيح: أولاً تحميل الإشارات، ثم الكلمات المفتاحية، ثم الفهرس
@@ -129,7 +182,7 @@ class TradingSystem:
     def _load_signal_list(self, key):
         """تحميل الإشارات مع معالجة خاصة"""
         try:
-            signal_str = config(key, default='')
+            signal_str = self.get_config_value(key, '')
             if not signal_str:
                 return []
             
@@ -149,7 +202,7 @@ class TradingSystem:
         default_bullish = ['bullish', 'buy', 'up', 'long', 'oversold']
         default_bearish = ['bearish', 'sell', 'down', 'short', 'overbought'] 
         default_trend = ['catcher', 'ichoch', 'trend']  # 🔥 إزالة tracer من الاتجاه
-        default_trend_confirm = ['tracer', 'confirmation']  # 🔥 إضافة كلمات تأكيد الاتجاه
+        default_trend_confirm = ['tracer']  # 🔥 إضافة كلمات تأكيد الاتجاه
         default_exit = ['exit', 'close', 'take_profit', 'stop_loss']
         
         self.custom_keywords = {
