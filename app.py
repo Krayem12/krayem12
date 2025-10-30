@@ -1419,6 +1419,11 @@ class TradingSystem:
 # =============================
 # تشغيل النظام
 # =============================
+def create_app():
+    """دالة إنشاء التطبيق لـ Gunicorn"""
+    system = TradingSystem()
+    return system.app
+
 if __name__ == '__main__':
     try:
         print("🚀 بدء تشغيل نظام التداول...")
@@ -1437,3 +1442,7 @@ if __name__ == '__main__':
         print(f"💥 خطأ غير متوقع: {e}")
         print("🔧 جاري إعادة تشغيل النظام...")
         time.sleep(5)
+
+# جعل التطبيق متاحاً لـ Gunicorn
+system_instance = TradingSystem()
+app = system_instance.app
