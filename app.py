@@ -58,11 +58,6 @@ class TradingSystem:
             'MAX_OPEN_TRADES': self.get_config_value('MAX_OPEN_TRADES', 10, int),
             'MAX_TRADES_PER_SYMBOL': self.get_config_value('MAX_TRADES_PER_SYMBOL', 1, int),
             
-            # 🆕 إعدادات احترام الاتجاه للمجموعتين
-            'RESPECT_TREND_FOR_REGULAR_TRADES': self.get_config_value('RESPECT_TREND_FOR_REGULAR_TRADES', True, bool),
-            'RESPECT_TREND_FOR_GROUP2': self.get_config_value('RESPECT_TREND_FOR_GROUP2', True, bool),  # ⭐ الجديد
-            'RESET_TRADES_ON_TREND_CHANGE': self.get_config_value('RESET_TRADES_ON_TREND_CHANGE', True, bool),
-
             # 🆕 Dual Group Strategy
             'DUAL_CONFIRMATION_STRATEGY': self.get_config_value('DUAL_CONFIRMATION_STRATEGY', False, bool),
             'REQUIRED_CONFIRMATIONS_GROUP1': self.get_config_value('REQUIRED_CONFIRMATIONS_GROUP1', 2, int),
@@ -77,6 +72,15 @@ class TradingSystem:
             'SEND_GENERAL_MESSAGES': self.get_config_value('SEND_GENERAL_MESSAGES', False, bool),
             'SEND_BULLISH_SIGNALS': self.get_config_value('SEND_BULLISH_SIGNALS', True, bool),
             'SEND_BEARISH_SIGNALS': self.get_config_value('SEND_BEARISH_SIGNALS', True, bool),
+
+            # 🆕 Smart Settings
+            'RESPECT_TREND_FOR_REGULAR_TRADES': self.get_config_value('RESPECT_TREND_FOR_REGULAR_TRADES', True, bool),
+            'RESPECT_TREND_FOR_GROUP2': self.get_config_value('RESPECT_TREND_FOR_GROUP2', True, bool),
+            'RESET_TRADES_ON_TREND_CHANGE': self.get_config_value('RESET_TRADES_ON_TREND_CHANGE', True, bool),
+            'ENABLE_SMART_TIMING': self.get_config_value('ENABLE_SMART_TIMING', True, bool),
+            'TREND_CONFIRMATION_DELAY': self.get_config_value('TREND_CONFIRMATION_DELAY', 2, int),
+            'ENABLE_COUNTER_TREND_PRESERVATION': self.get_config_value('ENABLE_COUNTER_TREND_PRESERVATION', True, bool),
+            'MAX_COUNTER_TREND_SAVE_TIME': self.get_config_value('MAX_COUNTER_TREND_SAVE_TIME', 600, int),
         }
 
         self.port = self.get_config_value('PORT', 10000, int)
@@ -102,10 +106,7 @@ class TradingSystem:
         try:
             value = os.environ.get(key)
             if value is None:
-                print(f"   ⚠️ {key}: Using default value '{default}'")
                 return default
-            
-            print(f"   ✅ {key}: '{value}'")
                 
             if cast_type == bool:
                 return value.lower() in ('true', '1', 'yes', 'y', 'on')
@@ -125,11 +126,9 @@ class TradingSystem:
         try:
             signal_str = os.environ.get(key, '')
             if not signal_str:
-                print(f"   📭 {key}: Empty")
                 return []
             
             signals = [s.strip() for s in signal_str.split(',') if s.strip()]
-            print(f"   ✅ {key}: {len(signals)} signals - {signals}")
             return signals
             
         except Exception as e:
@@ -137,10 +136,7 @@ class TradingSystem:
             return []
 
     def setup_keywords(self):
-        """تحميل الكلمات المفتاحية من ملف .env - إنجليزية فقط"""
-        
-        print("📖 جاري تحميل الكلمات المفتاحية من إعدادات البيئة...")
-        
+        """Load keywords from environment"""
         self.keywords = {
             'bullish': self._load_keywords_from_env('BULLISH_KEYWORDS'),
             'bearish': self._load_keywords_from_env('BEARISH_KEYWORDS'),
@@ -148,82 +144,40 @@ class TradingSystem:
             'trend_confirm': self._load_keywords_from_env('TREND_CONFIRM_KEYWORDS'),
             'exit': self._load_keywords_from_env('EXIT_KEYWORDS')
         }
-        
-        self._display_loaded_keywords()
 
     def _load_keywords_from_env(self, env_key):
-        """تحميل قائمة الكلمات المفتاحية من متغير بيئة"""
+        """Load keywords from environment variable"""
         try:
             keywords_str = os.environ.get(env_key, '')
             if not keywords_str:
-                print(f"   ⚠️ {env_key}: فارغ - سيتم استخدام القيمة الافتراضية")
                 return self._get_default_keywords(env_key)
             
-            # تقسيم الكلمات بالفاصلة وإزالة المسافات
             keywords = [kw.strip() for kw in keywords_str.split(',') if kw.strip()]
-            print(f"   ✅ {env_key}: تم تحميل {len(keywords)} كلمة")
             return keywords
             
         except Exception as e:
-            print(f"   ❌ خطأ في تحميل {env_key}: {e}")
+            print(f"   ❌ Error loading {env_key}: {e}")
             return self._get_default_keywords(env_key)
 
     def _get_default_keywords(self, env_key):
-        """الحصول على القيم الافتراضية للكلمات المفتاحية (إنجليزية فقط)"""
+        """Get default keywords (English only)"""
         default_keywords = {
-            'BULLISH_KEYWORDS': [
-                'bullish', 'bull', 'buy', 'long', 'call', 'up', 'upside', 
-                'rising', 'rise', 'upward', 'positive', 'support', 'bounce',
-                'recovery', 'rally', 'breakout', 'break up', 'strength',
-                'accumulate', 'bull market', 'uptrend', 'green', 'gain',
-                'higher', 'climb', 'surge', 'jump', 'soar', 'rebound'
-            ],
-            'BEARISH_KEYWORDS': [
-                'bearish', 'bear', 'sell', 'short', 'put', 'down', 'downside',
-                'falling', 'fall', 'downward', 'negative', 'resistance', 'drop',
-                'decline', 'correction', 'breakdown', 'break down', 'weakness',
-                'distribution', 'bear market', 'downtrend', 'red', 'loss',
-                'lower', 'slide', 'plunge', 'crash', 'collapse', 'pullback'
-            ],
-            'TREND_KEYWORDS': [
-                'catcher'  # القيمة الافتراضية المطلوبة
-            ],
-            'TREND_CONFIRM_KEYWORDS': [
-                'tracer', 'confirmation', 'confirm', 'validation', 'valid',
-                'confirmed', 'strength', 'weakness', 'follow through',
-                'momentum confirmation', 'trend confirmation',
-                'breakout confirmation', 'breakdown confirmation'
-            ],
-            'EXIT_KEYWORDS': [
-                'exit', 'close', 'close position', 'take profit', 'stop loss',
-                'tp', 'sl', 'target', 'profit taking', 'cut loss',
-                'stop', 'stop out', 'liquidate', 'square off',
-                'end trade', 'close trade', 'position close'
-            ]
+            'BULLISH_KEYWORDS': ['bullish', 'bull', 'buy', 'long', 'call', 'up', 'upside'],
+            'BEARISH_KEYWORDS': ['bearish', 'bear', 'sell', 'short', 'put', 'down', 'downside'],
+            'TREND_KEYWORDS': ['catcher'],
+            'TREND_CONFIRM_KEYWORDS': ['tracer', 'confirmation', 'confirm'],
+            'EXIT_KEYWORDS': ['exit', 'close', 'close position', 'take profit', 'stop loss']
         }
-        
         return default_keywords.get(env_key, [])
-
-    def _display_loaded_keywords(self):
-        """عرض الكلمات المفتاحية التي تم تحميلها"""
-        print("\n📚 الكلمات المفتاحية المحملة (إنجليزية فقط):")
-        for category, keywords in self.keywords.items():
-            sample = keywords[:3]  # عرض أول 3 كلمات فقط كمثال
-            print(f"   📁 {category}: {len(keywords)} كلمة - مثال: {sample}...")
 
     def setup_signal_index(self):
         """Create fast signal index"""
         self.signal_index = {}
-        total_signals = 0
-        
         for category, signals in self.signals.items():
-            total_signals += len(signals)
             for signal in signals:
                 normalized = self.normalize_signal(signal)
                 self.signal_index[normalized] = category
                 self.signal_index[signal] = category
-        
-        print(f"   🔍 Index ready: {len(self.signal_index)} entries from {total_signals} signals")
 
     def normalize_signal(self, signal):
         """Normalize signal for comparison"""
@@ -235,6 +189,8 @@ class TradingSystem:
         self.active_trades = {}
         self.symbol_trends = {}
         self.signal_history = []
+        self.trend_change_history = {}
+        self.saved_group2_signals = {}
 
     def setup_flask(self):
         """Setup Flask application"""
@@ -401,36 +357,26 @@ class TradingSystem:
         signal_type = signal_data['signal_type']
         signal_lower = signal_type.lower()
         
-        print(f"🔍 Classifying signal: '{signal_type}'")
-        
         # Keywords first
         if any(keyword in signal_lower for keyword in self.keywords['trend_confirm']):
-            print("✅ Classified as 'trend_confirm' based on keywords")
             return 'trend_confirm'
         if any(keyword in signal_lower for keyword in self.keywords['trend']):
-            print("✅ Classified as 'trend' based on keywords")
             return 'trend'
         
         # Exact match
         if signal_type in self.signal_index:
-            category = self.signal_index[signal_type]
-            print(f"✅ Classified as '{category}' based on exact match")
-            return category
+            return self.signal_index[signal_type]
         
         # Normalized match
         normalized = self.normalize_signal(signal_type)
         if normalized in self.signal_index:
-            category = self.signal_index[normalized]
-            print(f"✅ Classified as '{category}' based on normalized match")
-            return category
+            return self.signal_index[normalized]
         
         # Keyword-based classification
         for category, keywords in self.keywords.items():
             if any(keyword in signal_lower for keyword in keywords):
-                print(f"✅ Classified as '{category}' based on general keywords")
                 return category
         
-        print("❌ Signal not recognized - classified as 'unknown'")
         return 'unknown'
 
     # =============================
@@ -438,7 +384,7 @@ class TradingSystem:
     # =============================
 
     def handle_trend_signal(self, signal_data):
-        """Handle trend signals"""
+        """Handle trend signals with smart signal preservation"""
         symbol = signal_data['ticker']
         signal_lower = signal_data['original_signal'].lower()
         
@@ -459,19 +405,28 @@ class TradingSystem:
         
         print(f"🔧 Changing trend {symbol} from {current_trend} to {new_trend}")
         
+        # Update trend change history
+        self.trend_change_history[symbol] = datetime.now()
+        
         # Close trades if setting enabled
         if self.config['RESET_TRADES_ON_TREND_CHANGE']:
             self.close_all_trades_for_symbol(symbol, f"Trend change from {current_trend} to {new_trend}")
         
-        # 🆕 Reset group2 signals when trend changes
-        self.reset_group2_signals(symbol)
+        # Reset and preserve counter-trend signals
+        self.reset_group2_signals(symbol, new_trend)
+        
+        # Check saved signals against new trend
+        self.check_saved_signals_against_new_trend(symbol, new_trend)
         
         # Update trend
         self.symbol_trends[symbol] = new_trend
 
-        # Send notification
-        msg = self.format_trend_message(signal_data, new_trend, current_trend)
-        self.send_notifications(msg, 'trend', signal_data)
+        # 🛠️ التصحيح: التحقق من الإعداد قبل إرسال الإشعار
+        if self.should_send_message('trend', signal_data):
+            msg = self.format_trend_message(signal_data, new_trend, current_trend)
+            self.send_notifications(msg, 'trend', signal_data)
+        else:
+            print(f"🔇 Trend notification blocked by settings")
         
         self.logger.info(f"Trend change {symbol}: {current_trend} -> {new_trend}")
         return True
@@ -496,9 +451,13 @@ class TradingSystem:
             return False
 
         print(f"✅ Matching trend confirmation: {symbol} ({signal_trend})")
-        # Send trend confirmation
-        msg = self.format_trend_confirmation_message(signal_data, signal_trend)
-        self.send_notifications(msg, 'confirmation', signal_data)
+        
+        # 🛠️ التصحيح: التحقق من الإعداد قبل إرسال الإشعار
+        if self.should_send_message('confirmation', signal_data):
+            msg = self.format_trend_confirmation_message(signal_data, signal_trend)
+            self.send_notifications(msg, 'confirmation', signal_data)
+        else:
+            print(f"🔇 Confirmation notification blocked by settings")
         
         return True
 
@@ -508,25 +467,26 @@ class TradingSystem:
 
         # Check if new trade can be opened
         if not self.can_open_new_trade(symbol):
-            active_for_symbol = len(self.get_active_trades_for_symbol(symbol))
-            total_active = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
-            
-            self.logger.warning(
-                f"Ignoring trade opening: Trade limits reached - "
-                f"{symbol}: {active_for_symbol}/{self.config['MAX_TRADES_PER_SYMBOL']}, "
-                f"Total: {total_active}/{self.config['MAX_OPEN_TRADES']}"
-            )
             return False
 
-        # Check trend
+        # 🛠️ التصحيح المهم: التحقق من الاتجاه لكلا المجموعتين
         symbol_trend = self.symbol_trends.get(symbol)
-        if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] and symbol_trend:
+        
+        # للمجموعة الأولى
+        if (self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] and symbol_trend and 
+            signal_category in ['entry_bullish', 'entry_bearish']):
             expected_trend = 'BULLISH' if 'bullish' in signal_category else 'BEARISH'
             if symbol_trend != expected_trend:
                 print(f"❌ Rejecting trade: {signal_category} signal against {symbol_trend} trend for {symbol}")
                 return False
-            else:
-                print(f"✅ Trade matches trend: {signal_category} with {symbol_trend}")
+
+        # 🛠️ التصحيح الحاسم: للمجموعة الثانية - يجب أن تحترم الاتجاه عندما يكون RESPECT_TREND_FOR_GROUP2=true
+        if (self.config['RESPECT_TREND_FOR_GROUP2'] and symbol_trend and 
+            signal_category in ['entry_bullish1', 'entry_bearish1']):
+            expected_trend = 'BULLISH' if 'bullish' in signal_category else 'BEARISH'
+            if symbol_trend != expected_trend:
+                print(f"❌ Rejecting Group2 trade: {signal_category} signal against {symbol_trend} trend for {symbol}")
+                return False
 
         # Choose strategy
         if self.config['DUAL_CONFIRMATION_STRATEGY']:
@@ -535,8 +495,7 @@ class TradingSystem:
             return self.handle_single_confirmation(signal_data, symbol, signal_category)
 
     def handle_dual_confirmation(self, signal_data, symbol, signal_category):
-        """Handle dual confirmation strategy with trend control for both groups"""
-        # Determine group type
+        """Handle dual confirmation strategy"""
         group_type = 'group1' if signal_category in ['entry_bullish', 'entry_bearish'] else 'group2'
         key = f"{symbol}_{signal_category}_{group_type}"
         
@@ -551,31 +510,28 @@ class TradingSystem:
 
         # Add unique signal
         if clean_type not in group['unique_signals']:
+            # 🛠️ التصحيح: التحقق من الاتجاه للمجموعة الثانية بناءً على الإعداد
+            symbol_trend = self.symbol_trends.get(symbol)
+            if symbol_trend and group_type == 'group2' and self.config['RESPECT_TREND_FOR_GROUP2']:
+                expected_trend = 'BULLISH' if 'bullish' in signal_category else 'BEARISH'
+                if symbol_trend != expected_trend:
+                    print(f"❌ Rejecting group2 signal: {signal_category} against trend {symbol_trend}")
+                    return True  # نرفض الإشارة ولا نضيفها
+            
             group['unique_signals'].add(clean_type)
             group['signals_data'].append(signal_data)
             group['updated_at'] = datetime.now()
             
             print(f"✅ Adding unique signal to group {group_type}: '{signal_data['signal_type']}'")
             
-            # 🆕 التحقق من الاتجاه بناءً على نوع المجموعة والإعدادات
+            # Check trend based on group type and settings
             symbol_trend = self.symbol_trends.get(symbol)
-            if symbol_trend:
-                if group_type == 'group1' and self.config['RESPECT_TREND_FOR_REGULAR_TRADES']:
-                    if not self.check_trend_match(signal_category, symbol_trend):
-                        print(f"❌ Rejecting group1 signal: {signal_category} against trend {symbol_trend}")
-                        group['unique_signals'].remove(clean_type)
-                        group['signals_data'].pop()
-                        return True
-                        
-                elif group_type == 'group2' and self.config['RESPECT_TREND_FOR_GROUP2']:
-                    if not self.check_trend_match(signal_category, symbol_trend):
-                        print(f"❌ Rejecting group2 signal: {signal_category} against trend {symbol_trend}")
-                        group['unique_signals'].remove(clean_type)
-                        group['signals_data'].pop()
-                        return True
-                        
-                else:
-                    print(f"✅ Trend check skipped for {group_type} based on settings")
+            if symbol_trend and group_type == 'group1' and self.config['RESPECT_TREND_FOR_REGULAR_TRADES']:
+                if not self.check_trend_match(signal_category, symbol_trend):
+                    print(f"❌ Rejecting group1 signal: {signal_category} against trend {symbol_trend}")
+                    group['unique_signals'].remove(clean_type)
+                    group['signals_data'].pop()
+                    return True
                     
         else:
             print(f"🔄 Ignoring duplicate signal for group {group_type}: '{signal_data['signal_type']}'")
@@ -600,7 +556,6 @@ class TradingSystem:
             group['unique_signals'].add(clean_type)
             group['signals_data'].append(signal_data)
             group['updated_at'] = datetime.now()
-            print(f"✅ Adding unique signal: '{signal_data['signal_type']}'")
         else:
             print(f"🔄 Ignoring duplicate signal: '{signal_data['signal_type']}'")
             return True
@@ -610,239 +565,6 @@ class TradingSystem:
             return self.open_confirmed_trade(key, signal_category)
         
         print(f"📊 Waiting for confirmation: {len(group['unique_signals'])}/{self.config['REQUIRED_CONFIRMATIONS']}")
-        return True
-
-    def handle_exit_signal(self, signal_data):
-        """Handle exit signals"""
-        trade = self.find_active_trade(signal_data['ticker'])
-        if not trade:
-            self.logger.warning(f"No active trade for symbol {signal_data['ticker']}")
-            return False
-
-        # Update trade
-        trade.update({
-            'exit_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'status': 'CLOSED',
-            'exit_signal': signal_data['signal_type']
-        })
-
-        # Send exit notification
-        msg = self.format_exit_message(trade)
-        self.send_notifications(msg, 'exit', {'signal_type': trade.get('exit_signal', '')})
-        
-        print(f"✅ Closing trade #{trade['trade_id']}")
-        return True
-
-    def handle_unknown_signal(self, signal_data):
-        """Handle unknown signals"""
-        self.logger.warning(f"Unknown signal: '{signal_data['signal_type']}' for symbol {signal_data['ticker']}")
-        return False
-
-    def handle_general_signal(self, signal_data):
-        """Handle general signals"""
-        msg = self.format_general_message(signal_data)
-        self.send_notifications(msg, 'general', signal_data)
-        return True
-
-    # =============================
-    # Trade Management
-    # =============================
-
-    def get_active_trades_for_symbol(self, symbol):
-        """Get active trades for symbol"""
-        return [trade for trade in self.active_trades.values() 
-                if trade['ticker'].upper() == symbol.upper() and trade['status'] == 'OPEN']
-
-    def find_active_trade(self, ticker):
-        """Find active trade"""
-        active_trades = self.get_active_trades_for_symbol(ticker)
-        return active_trades[0] if active_trades else None
-
-    def can_open_new_trade(self, symbol):
-        """Check if new trade can be opened"""
-        active_for_symbol = len(self.get_active_trades_for_symbol(symbol))
-        total_active = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
-        
-        symbol_ok = active_for_symbol < self.config['MAX_TRADES_PER_SYMBOL']
-        total_ok = total_active < self.config['MAX_OPEN_TRADES']
-        
-        if not symbol_ok:
-            print(f"❌ Max trades for symbol {symbol} reached: {active_for_symbol}/{self.config['MAX_TRADES_PER_SYMBOL']}")
-        if not total_ok:
-            print(f"❌ Total max trades reached: {total_active}/{self.config['MAX_OPEN_TRADES']}")
-        
-        return symbol_ok and total_ok
-
-    def close_all_trades_for_symbol(self, symbol, reason):
-        """Close all trades for symbol"""
-        active_trades = self.get_active_trades_for_symbol(symbol)
-        
-        if not active_trades:
-            print(f"📭 No open trades for symbol {symbol}")
-            return
-
-        print(f"🔻 Closing {len(active_trades)} trades for {symbol} due to {reason}")
-        
-        for trade in active_trades:
-            trade.update({
-                'exit_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'status': 'CLOSED',
-                'exit_signal': f"Auto close - {reason}",
-                'auto_closed': True
-            })
-            
-            msg = self.format_auto_close_message(trade, reason)
-            self.send_notifications(msg, 'exit', {'signal_type': trade.get('exit_signal', '')})
-            print(f"🔻 Closing trade #{trade['trade_id']}")
-
-    # =============================
-    # Dual Strategy
-    # =============================
-
-    def create_signal_group(self, signal_category, group_type=None):
-        """Create new signal group"""
-        return {
-            'unique_signals': set(),
-            'signals_data': [],
-            'created_at': datetime.now(),
-            'updated_at': datetime.now(),
-            'signal_category': signal_category,
-            'group_type': group_type
-        }
-
-    def check_trend_match(self, signal_category, symbol_trend):
-        """Check trend match"""
-        is_bullish = 'bullish' in signal_category
-        expected_trend = 'BULLISH' if is_bullish else 'BEARISH'
-        return symbol_trend == expected_trend
-
-    def reset_group2_signals(self, symbol):
-        """Reset (clear) all pending group2 signals for a symbol when trend changes"""
-        if not symbol:
-            return
-
-        print(f"🔄 تصفير إشارات المجموعة الثانية للرمز {symbol} بسبب تغيير الاتجاه...")
-        
-        # البحث عن جميع المفاتيح الخاصة بالمجموعة الثانية لهذا الرمز
-        keys_to_delete = []
-        for key in self.pending_signals.keys():
-            # التحقق إذا كان المفتاح يحتوي على الرمز والمجموعة الثانية
-            if symbol in key and ('group2' in key or 'bearish1' in key or 'bullish1' in key):
-                keys_to_delete.append(key)
-        
-        # حذف المفاتيح التي وجدناها
-        deleted_count = 0
-        for key in keys_to_delete:
-            group_data = self.pending_signals[key]
-            signal_count = len(group_data['unique_signals'])
-            del self.pending_signals[key]
-            deleted_count += 1
-            print(f"   🗑️ تم حذف مجموعة {key} تحتوي على {signal_count} إشارة")
-        
-        if deleted_count > 0:
-            print(f"✅ تم تصفير {deleted_count} مجموعة من المجموعة الثانية للرمز {symbol}")
-        else:
-            print(f"📭 لا توجد إشارات للمجموعة الثانية للرمز {symbol} لتصفيرها")
-
-    def check_dual_conditions(self, symbol, signal_category):
-        """Check dual strategy conditions with trend control for both groups"""
-        base_category = 'entry_bullish' if 'bullish' in signal_category else 'entry_bearish'
-        group1_key = f"{symbol}_{base_category}_group1"
-        group2_key = f"{symbol}_{base_category}1_group2"
-
-        # 🆕 التحقق النهائي من الاتجاه مع مراعاة إعدادات كل مجموعة
-        symbol_trend = self.symbol_trends.get(symbol)
-        if symbol_trend:
-            expected_trend = 'BULLISH' if base_category == 'entry_bullish' else 'BEARISH'
-            
-            # إذا كانت كلا المجموعتين تحترمان الاتجاه
-            if self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] and self.config['RESPECT_TREND_FOR_GROUP2']:
-                if symbol_trend != expected_trend:
-                    print(f"❌ Rejecting trade opening: Current trend {symbol_trend} doesn't match signal {expected_trend}")
-                    self.pending_signals.pop(group1_key, None)
-                    self.pending_signals.pop(group2_key, None)
-                    return False
-                    
-            # إذا كانت المجموعة الأولى فقط تحترم الاتجاه
-            elif self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] and not self.config['RESPECT_TREND_FOR_GROUP2']:
-                group1_ready = self.check_group_ready(group1_key, self.config['REQUIRED_CONFIRMATIONS_GROUP1'])
-                if group1_ready and symbol_trend != expected_trend:
-                    print(f"❌ Rejecting trade opening: Group1 requires trend match - {symbol_trend} vs {expected_trend}")
-                    self.pending_signals.pop(group1_key, None)
-                    self.pending_signals.pop(group2_key, None)
-                    return False
-                    
-            # إذا كانت المجموعة الثانية فقط تحترم الاتجاه  
-            elif not self.config['RESPECT_TREND_FOR_REGULAR_TRADES'] and self.config['RESPECT_TREND_FOR_GROUP2']:
-                group2_ready = self.check_group_ready(group2_key, self.config['REQUIRED_CONFIRMATIONS_GROUP2'])
-                if group2_ready and symbol_trend != expected_trend:
-                    print(f"❌ Rejecting trade opening: Group2 requires trend match - {symbol_trend} vs {expected_trend}")
-                    self.pending_signals.pop(group1_key, None)
-                    self.pending_signals.pop(group2_key, None)
-                    return False
-
-        # Check both groups readiness
-        group1_ready = self.check_group_ready(group1_key, self.config['REQUIRED_CONFIRMATIONS_GROUP1'])
-        group2_ready = self.check_group_ready(group2_key, self.config['REQUIRED_CONFIRMATIONS_GROUP2'])
-
-        if group1_ready and group2_ready:
-            return self.open_dual_confirmed_trade(symbol, base_category, group1_key, group2_key)
-        
-        # Show progress
-        group1_count = len(self.pending_signals[group1_key]['unique_signals']) if group1_key in self.pending_signals else 0
-        group2_count = len(self.pending_signals[group2_key]['unique_signals']) if group2_key in self.pending_signals else 0
-        
-        print(f"📊 Dual confirmation progress - {symbol}:")
-        print(f"   📁 Group 1: {group1_count}/{self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
-        print(f"   📁 Group 2: {group2_count}/{self.config['REQUIRED_CONFIRMATIONS_GROUP2']}")
-        print(f"   📈 Trend Settings - Group1: {self.config['RESPECT_TREND_FOR_REGULAR_TRADES']}, Group2: {self.config['RESPECT_TREND_FOR_GROUP2']}")
-        
-        return True
-
-    def check_group_ready(self, group_key, required_count):
-        """Check group readiness"""
-        if group_key not in self.pending_signals:
-            return False
-        return len(self.pending_signals[group_key]['unique_signals']) >= required_count
-
-    def open_dual_confirmed_trade(self, symbol, base_category, group1_key, group2_key):
-        """Open dual confirmed trade"""
-        group1_data = self.pending_signals[group1_key]
-        group2_data = self.pending_signals[group2_key]
-
-        trade_id = str(uuid.uuid4())[:8]
-        direction = 'CALL' if base_category == 'entry_bullish' else 'PUT'
-
-        trade_info = {
-            'trade_id': trade_id,
-            'ticker': symbol,
-            'direction': direction,
-            'signal_type': group1_data['signals_data'][0]['signal_type'],
-            'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'status': 'OPEN',
-            'confirmation_count_group1': len(group1_data['unique_signals']),
-            'confirmation_count_group2': len(group2_data['unique_signals']),
-            'confirmed_signals_group1': list(group1_data['unique_signals']),
-            'confirmed_signals_group2': list(group2_data['unique_signals']),
-            'strategy_type': 'DUAL_CONFIRMATION'
-        }
-        self.active_trades[trade_id] = trade_info
-
-        # Send entry message
-        msg = self.format_dual_entry_message(trade_info, group1_data, group2_data)
-        self.send_notifications(msg, 'entry', {'signal_type': trade_info['signal_type'], 'direction': direction})
-
-        # Clean groups
-        del self.pending_signals[group1_key]
-        del self.pending_signals[group2_key]
-
-        # Show trade statistics
-        active_for_symbol = len(self.get_active_trades_for_symbol(symbol))
-        total_active = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
-        
-        print(f"📊 Trade statistics: {symbol}: {active_for_symbol}/{self.config['MAX_TRADES_PER_SYMBOL']} | Total: {total_active}/{self.config['MAX_OPEN_TRADES']}")
-        
-        self.logger.info(f"Opened {direction} trade #{trade_id} with dual strategy")
         return True
 
     def open_confirmed_trade(self, key, category):
@@ -867,20 +589,352 @@ class TradingSystem:
         }
         self.active_trades[trade_id] = trade_info
 
-        msg = self.format_entry_message(trade_info, data)
-        self.send_notifications(msg, 'entry', {'signal_type': trade_info['signal_type'], 'direction': direction})
+        # 🛠️ التصحيح: التحقق من الإعداد قبل إرسال الإشعار
+        if self.should_send_message('entry', {'signal_type': trade_info['signal_type'], 'direction': direction}):
+            msg = self.format_entry_message(trade_info, data)
+            self.send_notifications(msg, 'entry', {'signal_type': trade_info['signal_type'], 'direction': direction})
+        else:
+            print(f"🔇 Entry notification blocked by settings")
 
         del self.pending_signals[key]
         
-        # Show trade statistics
-        symbol = main_signal['ticker']
+        self.logger.info(f"Opened {direction} trade #{trade_id}")
+        return True
+
+    def open_dual_confirmed_trade(self, symbol, base_category, group1_key, group2_key):
+        """Open dual confirmed trade"""
+        group1_data = self.pending_signals[group1_key]
+        group2_data = self.pending_signals[group2_key]
+
+        trade_id = str(uuid.uuid4())[:8]
+        direction = 'CALL' if base_category == 'entry_bullish' else 'PUT'
+
+        trade_info = {
+            'trade_id': trade_id,
+            'ticker': symbol,
+            'direction': direction,
+            'signal_type': group1_data['signals_data'][0]['signal_type'],
+            'entry_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'OPEN',
+            'confirmation_count_group1': len(group1_data['unique_signals']),
+            'confirmation_count_group2': len(group2_data['unique_signals']),
+            'confirmed_signals_group1': list(group1_data['unique_signals']),
+            'confirmed_signals_group2': list(group2_data['unique_signals']),
+            'strategy_type': 'DUAL_CONFIRMATION'
+        }
+        self.active_trades[trade_id] = trade_info
+
+        # 🛠️ التصحيح: التحقق من الإعداد قبل إرسال الإشعار
+        if self.should_send_message('entry', {'signal_type': trade_info['signal_type'], 'direction': direction}):
+            msg = self.format_dual_entry_message(trade_info, group1_data, group2_data)
+            self.send_notifications(msg, 'entry', {'signal_type': trade_info['signal_type'], 'direction': direction})
+        else:
+            print(f"🔇 Dual entry notification blocked by settings")
+
+        # Clean groups
+        del self.pending_signals[group1_key]
+        del self.pending_signals[group2_key]
+
+        self.logger.info(f"Opened {direction} trade #{trade_id} with dual strategy")
+        return True
+
+    def handle_exit_signal(self, signal_data):
+        """Handle exit signals"""
+        trade = self.find_active_trade(signal_data['ticker'])
+        if not trade:
+            self.logger.warning(f"No active trade for symbol {signal_data['ticker']}")
+            return False
+
+        # Update trade
+        trade.update({
+            'exit_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'CLOSED',
+            'exit_signal': signal_data['signal_type']
+        })
+
+        # 🛠️ التصحيح: التحقق من الإعداد قبل إرسال الإشعار
+        if self.should_send_message('exit', {'signal_type': trade.get('exit_signal', '')}):
+            msg = self.format_exit_message(trade)
+            self.send_notifications(msg, 'exit', {'signal_type': trade.get('exit_signal', '')})
+        else:
+            print(f"🔇 Exit notification blocked by settings")
+        
+        print(f"✅ Closing trade #{trade['trade_id']}")
+        return True
+
+    def handle_unknown_signal(self, signal_data):
+        """Handle unknown signals"""
+        self.logger.warning(f"Unknown signal: '{signal_data['signal_type']}' for symbol {signal_data['ticker']}")
+        return False
+
+    def handle_general_signal(self, signal_data):
+        """Handle general signals"""
+        # 🛠️ التصحيح: التحقق من الإعداد قبل إرسال الإشعار
+        if self.should_send_message('general', signal_data):
+            msg = self.format_general_message(signal_data)
+            self.send_notifications(msg, 'general', signal_data)
+        else:
+            print(f"🔇 General notification blocked by settings")
+        return True
+
+    # =============================
+    # Trade Management
+    # =============================
+
+    def get_active_trades_for_symbol(self, symbol):
+        """Get active trades for symbol"""
+        return [trade for trade in self.active_trades.values() 
+                if trade['ticker'].upper() == symbol.upper() and trade['status'] == 'OPEN']
+
+    def find_active_trade(self, ticker):
+        """Find active trade"""
+        active_trades = self.get_active_trades_for_symbol(ticker)
+        return active_trades[0] if active_trades else None
+
+    def can_open_new_trade(self, symbol):
+        """Check if new trade can be opened"""
         active_for_symbol = len(self.get_active_trades_for_symbol(symbol))
         total_active = len([t for t in self.active_trades.values() if t['status'] == 'OPEN'])
         
-        print(f"📊 Trade statistics: {symbol}: {active_for_symbol}/{self.config['MAX_TRADES_PER_SYMBOL']} | Total: {total_active}/{self.config['MAX_OPEN_TRADES']}")
+        symbol_ok = active_for_symbol < self.config['MAX_TRADES_PER_SYMBOL']
+        total_ok = total_active < self.config['MAX_OPEN_TRADES']
         
-        self.logger.info(f"Opened {direction} trade #{trade_id}")
+        return symbol_ok and total_ok
+
+    def close_all_trades_for_symbol(self, symbol, reason):
+        """Close all trades for symbol"""
+        active_trades = self.get_active_trades_for_symbol(symbol)
+        
+        if not active_trades:
+            print(f"📭 No open trades for symbol {symbol}")
+            return
+
+        print(f"🔻 Closing {len(active_trades)} trades for {symbol} due to {reason}")
+        
+        for trade in active_trades:
+            trade.update({
+                'exit_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'status': 'CLOSED',
+                'exit_signal': f"Auto close - {reason}",
+                'auto_closed': True
+            })
+            
+            # 🛠️ التصحيح: التحقق من الإعداد قبل إرسال الإشعار
+            if self.should_send_message('exit', {'signal_type': trade.get('exit_signal', '')}):
+                msg = self.format_auto_close_message(trade, reason)
+                self.send_notifications(msg, 'exit', {'signal_type': trade.get('exit_signal', '')})
+            else:
+                print(f"🔇 Auto-close notification blocked by settings")
+
+    # =============================
+    # Dual Strategy
+    # =============================
+
+    def create_signal_group(self, signal_category, group_type=None):
+        """Create new signal group"""
+        return {
+            'unique_signals': set(),
+            'signals_data': [],
+            'created_at': datetime.now(),
+            'updated_at': datetime.now(),
+            'signal_category': signal_category,
+            'group_type': group_type
+        }
+
+    def check_trend_match(self, signal_category, symbol_trend):
+        """Check trend match"""
+        is_bullish = 'bullish' in signal_category
+        expected_trend = 'BULLISH' if is_bullish else 'BEARISH'
+        return symbol_trend == expected_trend
+
+    def reset_group2_signals(self, symbol, new_trend):
+        """Reset group2 signals while preserving counter-trend signals"""
+        if not symbol:
+            return
+
+        print(f"🔄 Resetting group2 signals for {symbol} due to trend change...")
+        
+        saved_signals = {}
+        keys_to_delete = []
+        
+        for key in list(self.pending_signals.keys()):
+            if symbol in key and ('group2' in key or 'bearish1' in key or 'bullish1' in key):
+                signal_category = self.pending_signals[key]['signal_category']
+                expected_trend = 'BULLISH' if 'bullish' in signal_category else 'BEARISH'
+                
+                # 🛠️ التصحيح المهم: التحقق من إعداد RESPECT_TREND_FOR_GROUP2
+                if not self.config['RESPECT_TREND_FOR_GROUP2']:
+                    # إذا كانت المجموعة الثانية لا تحترم الاتجاه، نحفظ جميع إشاراتها
+                    saved_signals[key] = {
+                        'unique_signals': self.pending_signals[key]['unique_signals'].copy(),
+                        'signals_data': self.pending_signals[key]['signals_data'].copy(),
+                        'signal_category': signal_category,
+                        'saved_at': datetime.now(),
+                        'expected_trend': expected_trend,
+                        'original_trend': new_trend
+                    }
+                    print(f"💾 حفظ جميع إشارات المجموعة الثانية: {key} (الاتجاه المتوقع: {expected_trend}, الاتجاه الجديد: {new_trend})")
+                    print(f"   📊 الإشارات المحفوظة: {list(self.pending_signals[key]['unique_signals'])}")
+                else:
+                    # 🛠️ التصحيح: إذا كانت تحترم الاتجاه، نحفظ فقط الإشارات المعاكسة
+                    if expected_trend != new_trend:
+                        saved_signals[key] = {
+                            'unique_signals': self.pending_signals[key]['unique_signals'].copy(),
+                            'signals_data': self.pending_signals[key]['signals_data'].copy(),
+                            'signal_category': signal_category,
+                            'saved_at': datetime.now(),
+                            'expected_trend': expected_trend,
+                            'original_trend': new_trend
+                        }
+                        print(f"💾 حفظ إشارات معاكسة: {key} (تتوقع {expected_trend}, الاتجاه الجديد {new_trend})")
+                        print(f"   📊 الإشارات المحفوظة: {list(self.pending_signals[key]['unique_signals'])}")
+                
+                keys_to_delete.append(key)
+        
+        # 🛠️ التصحيح: تخزين الإشارات المحفوظة بشكل صحيح
+        if saved_signals:
+            if symbol not in self.saved_group2_signals:
+                self.saved_group2_signals[symbol] = {}
+            self.saved_group2_signals[symbol].update(saved_signals)
+            print(f"💾 تم حفظ {len(saved_signals)} مجموعة إشارات للرمز {symbol}")
+            print(f"   📁 الإجمالي المحفوظ لـ {symbol}: {len(self.saved_group2_signals[symbol])}")
+    
+        # حذف المفاتيح من pending_signals
+        for key in keys_to_delete:
+            if key in self.pending_signals:
+                signal_count = len(self.pending_signals[key]['unique_signals'])
+                del self.pending_signals[key]
+                print(f"   🗑️ تم حذف مجموعة {key} تحتوي على {signal_count} إشارة")
+
+    def check_saved_signals_against_new_trend(self, symbol, new_trend):
+        """Check saved signals that match the new trend"""
+        if symbol not in self.saved_group2_signals:
+            print(f"📭 لا توجد إشارات محفوظة للرمز {symbol}")
+            return False
+        
+        saved_data = self.saved_group2_signals[symbol]
+        activated_count = 0
+        
+        print(f"🔍 التحقق من الإشارات المحفوظة للرمز {symbol} مقابل الاتجاه الجديد {new_trend}")
+        print(f"   📊 المجموعات المحفوظة: {list(saved_data.keys())}")
+        
+        for key, group_data in list(saved_data.items()):
+            expected_trend = group_data['expected_trend']
+            
+            # 🛠️ التصحيح: إذا كانت المجموعة الثانية لا تحترم الاتجاه، نفعّل جميع الإشارات
+            if not self.config['RESPECT_TREND_FOR_GROUP2']:
+                # نفعّل جميع إشارات المجموعة الثانية بغض النظر عن الاتجاه
+                self.pending_signals[key] = {
+                    'unique_signals': group_data['unique_signals'].copy(),
+                    'signals_data': group_data['signals_data'].copy(),
+                    'created_at': datetime.now(),
+                    'updated_at': datetime.now(),
+                    'signal_category': group_data['signal_category'],
+                    'group_type': 'group2',
+                    'activated_from_saved': True
+                }
+                activated_count += 1
+                print(f"🎯 تم تفعيل إشارات المجموعة الثانية: {key} ({len(group_data['unique_signals'])} إشارة)")
+                print(f"   📊 الإشارات المفعلة: {list(group_data['unique_signals'])}")
+            else:
+                # إذا كانت تحترم الاتجاه، نفعّل فقط المطابقة
+                if expected_trend == new_trend:
+                    self.pending_signals[key] = {
+                        'unique_signals': group_data['unique_signals'].copy(),
+                        'signals_data': group_data['signals_data'].copy(),
+                        'created_at': datetime.now(),
+                        'updated_at': datetime.now(),
+                        'signal_category': group_data['signal_category'],
+                        'group_type': 'group2',
+                        'activated_from_saved': True
+                    }
+                    activated_count += 1
+                    print(f"🎯 تم تفعيل الإشارات المحفوظة: {key} ({len(group_data['unique_signals'])} إشارة)")
+                    print(f"   📊 الإشارات المفعلة: {list(group_data['unique_signals'])}")
+            
+            # حذف المجموعة من المحفوظات بعد تفعيلها
+            del saved_data[key]
+            
+            # التحقق فوراً إذا كانت الشروط مكتملة لفتح صفقة
+            self.check_immediate_trade_opening(symbol, group_data['signal_category'])
+        
+        if activated_count > 0:
+            print(f"🚀 تم تفعيل {activated_count} مجموعة إشارات محفوظة للرمز {symbol}")
+            # إذا تم تفعيل كل المجموعات المحفوظة، احذف الرمز من saved_group2_signals
+            if not self.saved_group2_signals[symbol]:
+                del self.saved_group2_signals[symbol]
+            return True
+        
+        return False
+
+    def check_immediate_trade_opening(self, symbol, signal_category):
+        """Check immediate trade opening after activating saved signals"""
+        base_category = 'entry_bullish' if 'bullish' in signal_category else 'entry_bearish'
+        group1_key = f"{symbol}_{base_category}_group1"
+        group2_key = f"{symbol}_{base_category}1_group2"
+        
+        # Check both groups readiness
+        group1_ready = self.check_group_ready(group1_key, self.config['REQUIRED_CONFIRMATIONS_GROUP1'])
+        group2_ready = self.check_group_ready(group2_key, self.config['REQUIRED_CONFIRMATIONS_GROUP2'])
+        
+        if group1_ready and group2_ready:
+            print(f"🎉 Signals complete after activation - opening immediate trade!")
+            return self.open_dual_confirmed_trade(symbol, base_category, group1_key, group2_key)
+        
+        return False
+
+    def check_dual_conditions(self, symbol, signal_category):
+        """Check dual strategy conditions"""
+        base_category = 'entry_bullish' if 'bullish' in signal_category else 'entry_bearish'
+        group1_key = f"{symbol}_{base_category}_group1"
+        group2_key = f"{symbol}_{base_category}1_group2"
+
+        symbol_trend = self.symbol_trends.get(symbol)
+        
+        # Smart timing: Check trend stability
+        if symbol_trend and self.config['ENABLE_SMART_TIMING']:
+            if self.is_trend_recently_changed(symbol):
+                delay_minutes = self.config['TREND_CONFIRMATION_DELAY']
+                time_since_change = (datetime.now() - self.trend_change_history[symbol]).total_seconds()
+                remaining_time = (delay_minutes * 60) - time_since_change
+                
+                print(f"⏳ Trend recently changed for {symbol} - waiting {remaining_time:.0f} seconds for stability...")
+                return True
+
+        # Check both groups readiness
+        group1_ready = self.check_group_ready(group1_key, self.config['REQUIRED_CONFIRMATIONS_GROUP1'])
+        group2_ready = self.check_group_ready(group2_key, self.config['REQUIRED_CONFIRMATIONS_GROUP2'])
+
+        if group1_ready and group2_ready:
+            # Final smart timing check
+            if self.config['ENABLE_SMART_TIMING'] and self.is_trend_recently_changed(symbol):
+                delay_minutes = self.config['TREND_CONFIRMATION_DELAY']
+                print(f"⏸️  Signals collected but waiting {delay_minutes} minutes for trend stability")
+                return True
+                
+            return self.open_dual_confirmed_trade(symbol, base_category, group1_key, group2_key)
+        
         return True
+
+    def is_trend_recently_changed(self, symbol):
+        """Check if trend was recently changed"""
+        if not self.config['ENABLE_SMART_TIMING']:
+            return False
+        
+        last_trend_change = self.trend_change_history.get(symbol)
+        if not last_trend_change:
+            return False
+        
+        time_since_change = (datetime.now() - last_trend_change).total_seconds()
+        delay_period = self.config['TREND_CONFIRMATION_DELAY'] * 60
+        
+        return time_since_change < delay_period
+
+    def check_group_ready(self, group_key, required_count):
+        """Check group readiness"""
+        if group_key not in self.pending_signals:
+            return False
+        return len(self.pending_signals[group_key]['unique_signals']) >= required_count
 
     def clean_expired_signals(self):
         """Clean expired signals"""
@@ -893,17 +947,39 @@ class TradingSystem:
         ]
         
         for key in expired_keys:
-            group_type = self.pending_signals[key].get('group_type', 'unknown')
             signal_count = len(self.pending_signals[key]['unique_signals'])
             del self.pending_signals[key]
-            print(f"🗑️ Cleaning expired group: {key} ({group_type}) - {signal_count} signals")
+            print(f"🗑️ Cleaning expired group: {key} - {signal_count} signals")
+
+        # Clean expired saved signals
+        self.clean_expired_saved_signals()
+
+    def clean_expired_saved_signals(self):
+        """Clean expired saved signals"""
+        if not self.config['ENABLE_COUNTER_TREND_PRESERVATION']:
+            return
+            
+        now = datetime.now()
+        expired_symbols = []
+        
+        for symbol, saved_data in self.saved_group2_signals.items():
+            for key, group_data in saved_data.items():
+                save_time = group_data['saved_at']
+                if (now - save_time).total_seconds() > self.config['MAX_COUNTER_TREND_SAVE_TIME']:
+                    expired_symbols.append(symbol)
+                    break
+        
+        for symbol in expired_symbols:
+            signal_count = len(self.saved_group2_signals[symbol])
+            del self.saved_group2_signals[symbol]
+            print(f"🧹 Cleaned {signal_count} expired saved signals for {symbol}")
 
     # =============================
     # Notifications and Sending
     # =============================
 
     def should_send_message(self, message_type, signal_data=None):
-        """Check if message should be sent"""
+        """Check if message should be sent - FIXED VERSION"""
         type_controls = {
             'trend': self.config['SEND_TREND_MESSAGES'],
             'entry': self.config['SEND_ENTRY_MESSAGES'],
@@ -912,8 +988,11 @@ class TradingSystem:
             'general': self.config['SEND_GENERAL_MESSAGES']
         }
         
-        if not type_controls.get(message_type, False):
-            print(f"🔕 {message_type} messages disabled")
+        # 🛠️ التصحيح: التحقق من القيمة الفعلية للإعداد
+        if message_type not in type_controls:
+            return False
+        
+        if not type_controls[message_type]:
             return False
 
         if signal_data:
@@ -921,30 +1000,34 @@ class TradingSystem:
             direction = signal_data.get('direction', '').upper()
             
             if ('bullish' in signal_text or direction == 'CALL') and not self.config['SEND_BULLISH_SIGNALS']:
-                print("🔕 Bullish signals disabled")
                 return False
             if ('bearish' in signal_text or direction == 'PUT') and not self.config['SEND_BEARISH_SIGNALS']:
-                print("🔕 Bearish signals disabled")
                 return False
 
         return True
 
     def send_notifications(self, message, message_type, signal_data=None):
-        """Send notifications"""
+        """Send notifications - FIXED VERSION"""
+        # 🛠️ التصحيح: التحقق المزدوج للتأكد من تطبيق الإعدادات
         if not self.should_send_message(message_type, signal_data):
+            print(f"🔇 Notification blocked by settings: {message_type}")
             return
 
         # Send Telegram
         if self.config['TELEGRAM_ENABLED']:
-            telegram_sent = self.send_telegram(message)
-            if telegram_sent:
-                print(f"✅ [Telegram] Sent {message_type} message")
+            success = self.send_telegram(message)
+            if success:
+                print(f"📤 Telegram notification sent: {message_type}")
+            else:
+                print(f"❌ Failed to send Telegram notification: {message_type}")
 
         # Send to external server
         if self.config['EXTERNAL_SERVER_ENABLED']:
-            external_sent = self.send_to_external_server_with_retry(message, message_type)
-            if external_sent:
-                print(f"✅ [Server] Sent {message_type} message")
+            success = self.send_to_external_server_with_retry(message, message_type)
+            if success:
+                print(f"🌐 External server notification sent: {message_type}")
+            else:
+                print(f"❌ Failed to send external server notification: {message_type}")
 
     def send_telegram(self, message):
         """Send to Telegram"""
@@ -952,6 +1035,7 @@ class TradingSystem:
         chat_id = self.config['TELEGRAM_CHAT_ID']
         
         if not token or not chat_id:
+            print("❌ Telegram not configured: missing token or chat_id")
             return False
 
         try:
@@ -969,9 +1053,7 @@ class TradingSystem:
             if self.send_to_external_server(message_text, message_type):
                 return True
             if attempt < max_retries:
-                wait_time = 2 ** attempt
-                print(f"🔄 Retrying in {wait_time} seconds... ({attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
+                time.sleep(2 ** attempt)
         return False
 
     def send_to_external_server(self, message_text, message_type):
@@ -1197,7 +1279,17 @@ class TradingSystem:
             "pending_groups": len(self.pending_signals),
             'trends': self.symbol_trends,
             "signal_history_count": len(self.signal_history),
-            "dual_confirmation_strategy": self.config['DUAL_CONFIRMATION_STRATEGY']
+            "dual_confirmation_strategy": self.config['DUAL_CONFIRMATION_STRATEGY'],
+            "saved_signals_count": len(self.saved_group2_signals),
+            "notification_settings": {
+                "SEND_TREND_MESSAGES": self.config['SEND_TREND_MESSAGES'],
+                "SEND_ENTRY_MESSAGES": self.config['SEND_ENTRY_MESSAGES'],
+                "SEND_EXIT_MESSAGES": self.config['SEND_EXIT_MESSAGES'],
+                "SEND_CONFIRMATION_MESSAGES": self.config['SEND_CONFIRMATION_MESSAGES'],
+                "SEND_GENERAL_MESSAGES": self.config['SEND_GENERAL_MESSAGES'],
+                "SEND_BULLISH_SIGNALS": self.config['SEND_BULLISH_SIGNALS'],
+                "SEND_BEARISH_SIGNALS": self.config['SEND_BEARISH_SIGNALS']
+            }
         }
 
     def display_loaded_signals(self):
@@ -1217,25 +1309,15 @@ class TradingSystem:
             print("🎯 Dual Group Strategy:")
             print(f"   • Group 1: {self.config['REQUIRED_CONFIRMATIONS_GROUP1']} signals")
             print(f"   • Group 2: {self.config['REQUIRED_CONFIRMATIONS_GROUP2']} signals")
-            print(f"   • Confirmation Timeout: {self.config['DUAL_CONFIRMATION_TIMEOUT']} seconds")
-            print(f"   • Respect Trend for Group 1: {self.config['RESPECT_TREND_FOR_REGULAR_TRADES']}")
-            print(f"   • Respect Trend for Group 2: {self.config['RESPECT_TREND_FOR_GROUP2']}")
-            # 🆕 إضافة إعداد تصفير المجموعة الثانية
-            print(f"   • Reset Group2 Signals on Trend Change: Enabled")  # هذا الإعداد ثابت حالياً
-        else:
-            print(f"   • Required Confirmations: {self.config['REQUIRED_CONFIRMATIONS']}")
-            print(f"   • Respect Trend for Trades: {self.config['RESPECT_TREND_FOR_REGULAR_TRADES']}")
-        
-        print(f"   • Close Trades on Trend Change: {'Enabled' if self.config['RESET_TRADES_ON_TREND_CHANGE'] else 'Disabled'}")
-        
-        print("🔑 Keywords Configuration:")
-        for category, keywords in self.keywords.items():
-            print(f"   • {category}: {len(keywords)} keywords")
         
         print("🔔 Notifications:")
         print(f"   • Trend Messages: {'Enabled' if self.config['SEND_TREND_MESSAGES'] else 'Disabled'}")
         print(f"   • Entry Messages: {'Enabled' if self.config['SEND_ENTRY_MESSAGES'] else 'Disabled'}")
         print(f"   • Exit Messages: {'Enabled' if self.config['SEND_EXIT_MESSAGES'] else 'Disabled'}")
+        print(f"   • Confirmation Messages: {'Enabled' if self.config['SEND_CONFIRMATION_MESSAGES'] else 'Disabled'}")
+        print(f"   • General Messages: {'Enabled' if self.config['SEND_GENERAL_MESSAGES'] else 'Disabled'}")
+        print(f"   • Bullish Signals: {'Enabled' if self.config['SEND_BULLISH_SIGNALS'] else 'Disabled'}")
+        print(f"   • Bearish Signals: {'Enabled' if self.config['SEND_BEARISH_SIGNALS'] else 'Disabled'}")
 
 # =============================
 # Main Execution
