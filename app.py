@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AbuRayan_Bot_V8.9_Controlled_Trades.py#!/usr/bin/env python3
+AbuRayan_Bot_V8_Controlled_Trades.py#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AbuRayan_Bot_V8.9_Controlled_Trades.py
+AbuRayan_Bot_V8_Controlled_Trades.py
 Trading Signal Processing System - Full Trade Control with Dual Group Strategy
 """
 
@@ -2795,4 +2795,5 @@ if __name__ == '__main__':
 # Make app available for Gunicorn
 system_instance = TradingSystem()
 app = system_instance.app
+
 
