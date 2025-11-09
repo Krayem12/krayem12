@@ -16,6 +16,10 @@ class TradeManager:
         # ✅ آخر اتجاه تم الإبلاغ عنه لكل رمز
         self.last_reported_trend = {}
 
+        # 🆕 إضافة عداد منفصل لكل رمز
+        self.symbol_trade_count = {}
+        self.total_trade_counter = 0  # عداد إجمالي
+
         # ✅ عداد أو مقاييس تشغيل النظام إن وجدت
         self.metrics = {
             "trades_opened": 0,
@@ -35,7 +39,7 @@ class TradeManager:
         
         print(f"📈 تم تحديث الاتجاه: {symbol} -> {direction.upper()} (سابقاً: {old_trend})")
         
-        # التحقق مما إذا كان التغيير يستحق الإبلاغ
+        # التحقق مما إذا كان التغيير يستحق الإبلاع
         should_report = self._should_report_trend_change(symbol, direction, old_trend)
         
         # إغلاق الصفقات المخالفة للاتجاه الجديد
@@ -90,34 +94,56 @@ class TradeManager:
             self.close_trade(trade_id)
 
     def open_trade(self, symbol, direction):
-        """فتح صفقة جديدة مع التحقق من الحدود"""
-        # التحقق من الحد الأقصى للصفقات
+        """فتح صفقة جديدة مع إصلاح العداد"""
+        # التحقق من الحد الأقصى للصفقات الإجمالي
         if len(self.active_trades) >= self.config['MAX_OPEN_TRADES']:
             print(f"❌ تجاوز الحد الأقصى للصفقات المفتوحة: {self.config['MAX_OPEN_TRADES']}")
             return False
 
+        # 🆕 تهيئة عداد الرمز إذا لم يكن موجوداً
+        if symbol not in self.symbol_trade_count:
+            self.symbol_trade_count[symbol] = 0
+
         # التحقق من الحد الأقصى للصفقات لكل رمز
-        symbol_trades = sum(1 for trade in self.active_trades.values() if trade["symbol"] == symbol)
-        if symbol_trades >= self.config['MAX_TRADES_PER_SYMBOL']:
+        if self.symbol_trade_count[symbol] >= self.config['MAX_TRADES_PER_SYMBOL']:
             print(f"❌ تجاوز الحد الأقصى لصفقات الرمز {symbol}: {self.config['MAX_TRADES_PER_SYMBOL']}")
             return False
 
-        trade_id = f"{symbol}_{len(self.active_trades)+1}"
+        # 🆕 إصلاح إنشاء معرف الصفقة
+        self.total_trade_counter += 1
+        trade_id = f"{symbol}_{self.total_trade_counter}"
+        
         self.active_trades[trade_id] = {
             "symbol": symbol, 
             "side": direction,
             "opened_at": self._get_current_timestamp()
         }
+        
+        # 🆕 تحديث العداد بشكل صحيح
+        self.symbol_trade_count[symbol] += 1
         self.metrics["trades_opened"] += 1
+        
         print(f"🚀 فتح صفقة: {symbol} | الاتجاه: {direction.upper()} | معرف الصفقة: {trade_id}")
+        print(f"📊 صفقات {symbol}: {self.symbol_trade_count[symbol]}/{self.config['MAX_TRADES_PER_SYMBOL']}")
+        print(f"📊 الصفقات الإجمالية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
+        
         return True
 
     def close_trade(self, trade_id):
-        """إغلاق صفقة"""
+        """إغلاق صفقة مع تحديث العداد"""
         if trade_id in self.active_trades:
+            symbol = self.active_trades[trade_id]["symbol"]
             print(f"✅ تم إغلاق الصفقة: {trade_id}")
+            
+            # 🆕 تحديث العداد عند الإغلاق
+            if symbol in self.symbol_trade_count:
+                self.symbol_trade_count[symbol] = max(0, self.symbol_trade_count[symbol] - 1)
+            
             del self.active_trades[trade_id]
             self.metrics["trades_closed"] += 1
+            
+            print(f"📊 صفقات {symbol} المتبقية: {self.symbol_trade_count.get(symbol, 0)}/{self.config['MAX_TRADES_PER_SYMBOL']}")
+            print(f"📊 الصفقات الإجمالية المتبقية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
             return True
         else:
             print(f"⚠️ الصفقة غير موجودة: {trade_id}")
@@ -142,7 +168,8 @@ class TradeManager:
         return datetime.now().isoformat()
 
     def get_active_trades_count(self, symbol=None):
-        """الحصول على عدد الصفقات النشطة"""
+        """الحصول على عدد الصفقات النشطة - إصلاح"""
         if symbol:
-            return sum(1 for trade in self.active_trades.values() if trade["symbol"] == symbol)
+            # 🆕 استخدام العداد المخصص للرمز
+            return self.symbol_trade_count.get(symbol, 0)
         return len(self.active_trades)

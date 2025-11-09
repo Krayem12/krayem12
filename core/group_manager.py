@@ -118,9 +118,9 @@ class GroupManager:
         groups = self.pending_signals[group_key]
 
         # استخدام الأسماء الصحيحة من الإعدادات
-        req_g1 = self.config.get("REQUIRED_CONFIRMATIONS_GROUP1", 2)
-        req_g2 = self.config.get("REQUIRED_CONFIRMATIONS_GROUP2", 1)
-        req_g3 = self.config.get("REQUIRED_CONFIRMATIONS_GROUP3", 1)
+        req_g1 = self.config["REQUIRED_CONFIRMATIONS_GROUP1"]
+        req_g2 = self.config["REQUIRED_CONFIRMATIONS_GROUP2"] 
+        req_g3 = self.config["REQUIRED_CONFIRMATIONS_GROUP3"]
 
         # 🎯 حساب الإشارات بناءً على الاتجاه
         if direction == "buy":
@@ -134,24 +134,40 @@ class GroupManager:
 
         print(f"📊 إحصائيات المجموعات لـ {symbol} [{direction.upper()}]: G1={g1_count}/{req_g1}, G2={g2_count}/{req_g2}, G3={g3_count}/{req_g3}")
 
-        # 🎯 التحقق من شروط المجموعة الأولى (الأساسية)
+        # 🎯 التحقق من شروط المجموعة الأولى (الأساسية) - إلزامي
         if g1_count < req_g1:
             print(f"❌ شروط المجموعة الأولى غير محققة لـ {symbol}")
             return False
 
-        # 🎯 التحقق من استراتيجية التداول المحددة
-        trading_mode = self.config.get('TRADING_MODE', 'GROUP1_GROUP2_GROUP3')
+        # 🎯 التحقق من استراتيجية التداول المحددة - التصحيح هنا!
+        trading_mode = self.config['TRADING_MODE']  # ⚠️ التصحيح: استخدام القيمة الفعلية
+        print(f"🎯 وضع التداول الفعلي: {trading_mode}")
+        
         condition_met = False
+        group2_enabled = self.config.get('GROUP2_ENABLED', False)
+        group3_enabled = self.config.get('GROUP3_ENABLED', False)
 
         if trading_mode == 'GROUP1':
             condition_met = True
+            print(f"✅ وضع GROUP1: مطلوب G1 فقط")
+            
         elif trading_mode == 'GROUP1_GROUP2':
-            condition_met = g2_count >= req_g2 and self.config.get('GROUP2_ENABLED', False)
+            condition_met = g2_count >= req_g2 and group2_enabled
+            print(f"🔍 وضع GROUP1_GROUP2: G2={g2_count}/{req_g2}, مفعل={group2_enabled}")
+            
         elif trading_mode == 'GROUP1_GROUP3':
-            condition_met = g3_count >= req_g3 and self.config.get('GROUP3_ENABLED', False)
+            condition_met = g3_count >= req_g3 and group3_enabled
+            print(f"🔍 وضع GROUP1_GROUP3: G3={g3_count}/{req_g3}, مفعل={group3_enabled}")
+            
         elif trading_mode == 'GROUP1_GROUP2_GROUP3':
-            condition_met = (g2_count >= req_g2 and self.config.get('GROUP2_ENABLED', False)) and \
-                          (g3_count >= req_g3 and self.config.get('GROUP3_ENABLED', False))
+            g2_condition = g2_count >= req_g2 and group2_enabled
+            g3_condition = g3_count >= req_g3 and group3_enabled
+            condition_met = g2_condition and g3_condition
+            print(f"🔍 وضع GROUP1_GROUP2_GROUP3: G2={g2_condition}, G3={g3_condition}")
+            
+        else:
+            print(f"⚠️ وضع تداول غير معروف: {trading_mode}")
+            condition_met = False
 
         if condition_met:
             print(f"🎯 شروط الدخول متحققة لـ {symbol} باستراتيجية {trading_mode} | الاتجاه: {direction.upper()}")
@@ -164,13 +180,14 @@ class GroupManager:
                     'group1_signals': self._get_signals_by_direction(groups, direction, 'group1'),
                     'group2_signals': self._get_signals_by_direction(groups, direction, 'group2'),
                     'group3_signals': self._get_signals_by_direction(groups, direction, 'group3'),
-                    'strategy_type': trading_mode
+                    'strategy_type': trading_mode  # استخدام الوضع الفعلي
                 }
                 self._reset_groups(symbol)
                 return trade_info
             else:
                 return False
 
+        print(f"❌ شروط الاستراتيجية غير محققة لـ {symbol} - الوضع: {trading_mode}")
         return False
 
     def _get_signals_by_direction(self, groups, direction, group_type):
@@ -192,7 +209,15 @@ class GroupManager:
         return []
 
     def _open_trade(self, symbol, direction):
+        """فتح صفقة مع تحقق إضافي من الحدود"""
         print(f"🚀 محاولة فتح صفقة: {symbol} | الاتجاه: {direction.upper()}")
+        
+        # 🆕 تحقق إضافي قبل فتح الصفقة
+        current_count = self.trade_manager.get_active_trades_count(symbol)
+        if current_count >= self.config['MAX_TRADES_PER_SYMBOL']:
+            print(f"❌ وصل الرمز {symbol} للحد الأقصى: {current_count}/{self.config['MAX_TRADES_PER_SYMBOL']}")
+            return False
+            
         return self.trade_manager.open_trade(symbol, direction)
 
     def _reset_groups(self, symbol):

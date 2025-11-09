@@ -6,7 +6,7 @@ from datetime import datetime
 
 class MessageFormatter:
     """فئة متخصصة في تنسيق رسائل النظام - UPDATED WITH CORRECT TREND DISPLAY"""
-    
+
     @staticmethod
     def format_trend_message(signal_data, new_trend, old_trend):
         """Format trend message with CORRECT old and new trends"""
@@ -37,12 +37,11 @@ class MessageFormatter:
 ┗━━━━━━━━━━━━━━━━━━━━
 🕐 {timestamp}"""
 
-    # ... باقي الدوال تبقى كما هي بدون تغيير ...
     @staticmethod
     def format_detailed_entry_message(symbol, signal_type, direction, current_trend, strategy_type, 
                                     group1_signals, group2_signals, group3_signals, 
                                     active_for_symbol, total_active, config):
-        """Format detailed entry message with ALL signals information"""
+        """Format detailed entry message with ALL signals information - FIXED VERSION"""
         timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
 
         trend_icon = '🟢📈 BULLISH' if current_trend.lower() == 'bullish' else '🔴📉 BEARISH'
@@ -53,62 +52,33 @@ class MessageFormatter:
         ) else '🔴 غير مطابق'
 
         # تحديد نص الاستراتيجية
-        if strategy_type == 'GROUP1_ONLY':
-            strategy_text = "المجموعة الأولى فقط"
-        elif strategy_type == 'DUAL_GROUP':
-            strategy_text = "تأكيد مزدوج (مجموعتين)"
-        elif strategy_type == 'TRIPLE_GROUP':
-            strategy_text = "تأكيد ثلاثي (3 مجموعات)"
-        elif strategy_type == 'GROUP1_GROUP3':
-            strategy_text = "تأكيد مزدوج (المجموعة الأولى + الثالثة)"
-        elif strategy_type == 'GROUP2_GROUP3':
-            strategy_text = "تأكيد مزدوج (المجموعة الثانية + الثالثة)"
-        elif strategy_type == 'GROUP3_ONLY':
-            strategy_text = "المجموعة الثالثة فقط"
-        else:
-            strategy_text = strategy_type
+        strategy_text = strategy_type  # استخدام النص الفعلي من النظام
 
-        # عرض إشارات المجموعة الأولى
-        group1_list = ''
+        # 🎯 إصلاح: عرض جميع الإشارات الفعلية بغض النظر عن الاستراتيجية
+        signals_display = ""
+        
+        # عرض إشارات المجموعة الأولى إذا كانت موجودة
         if group1_signals:
             numbered_group1 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group1_signals)]
-            group1_list = "\n" + "\n".join(numbered_group1)
-        else:
-            group1_list = "\n┃   - لا توجد إشارات"
-
-        # عرض إشارات المجموعة الثانية
-        group2_list = ''
+            signals_display += f"┃ 🔴 إشارات المجموعة الأولى ({len(group1_signals)}):\n" + "\n".join(numbered_group1)
+        
+        # عرض إشارات المجموعة الثانية إذا كانت موجودة
         if group2_signals:
+            if signals_display:
+                signals_display += "\n"
             numbered_group2 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group2_signals)]
-            group2_list = "\n" + "\n".join(numbered_group2)
-        else:
-            group2_list = "\n┃   - لا توجد إشارات"
-
-        # عرض إشارات المجموعة الثالثة
-        group3_list = ''
+            signals_display += f"┃ 🔵 إشارات المجموعة الثانية ({len(group2_signals)}):\n" + "\n".join(numbered_group2)
+        
+        # عرض إشارات المجموعة الثالثة إذا كانت موجودة
         if group3_signals:
+            if signals_display:
+                signals_display += "\n"
             numbered_group3 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group3_signals)]
-            group3_list = "\n" + "\n".join(numbered_group3)
-        else:
-            group3_list = "\n┃   - لا توجد إشارات"
-
-        # تحديد أي مجموعات سيتم عرضها بناءً على نوع الاستراتيجية
-        signals_display = ""
-        if strategy_type == 'GROUP1_ONLY':
-            signals_display = f"┃ 🔔 إشارات المجموعة الأولى ({len(group1_signals)} إشارات):{group1_list}"
-        elif strategy_type == 'DUAL_GROUP':
-            signals_display = f"┃ 🔔 إشارات المجموعة الأولى ({len(group1_signals)} إشارات):{group1_list}\n"
-            signals_display += f"┃ 🔔 إشارات المجموعة الثانية ({len(group2_signals)} إشارات):{group2_list}"
-        elif strategy_type == 'GROUP1_GROUP3':
-            signals_display = f"┃ 🔔 إشارات المجموعة الأولى ({len(group1_signals)} إشارات):{group1_list}\n"
-            signals_display += f"┃ 🔷 إشارات المجموعة الثالثة ({len(group3_signals)} إشارات):{group3_list}"
-        elif strategy_type == 'GROUP2_GROUP3':
-            signals_display = f"┃ 🔔 إشارات المجموعة الثانية ({len(group2_signals)} إشارات):{group2_list}\n"
-            signals_display += f"┃ 🔷 إشارات المجموعة الثالثة ({len(group3_signals)} إشارات):{group3_list}"
-        elif strategy_type == 'GROUP3_ONLY':
-            signals_display = f"┃ 🔷 إشارات المجموعة الثالثة ({len(group3_signals)} إشارات):{group3_list}"
-        else:
-            signals_display = f"┃ 🔔 الإشارات المؤكدة:{group1_list}"
+            signals_display += f"┃ 🟢 إشارات المجموعة الثالثة ({len(group3_signals)}):\n" + "\n".join(numbered_group3)
+        
+        # إذا لم توجد أي إشارات (حالة طارئة)
+        if not signals_display:
+            signals_display = "┃   ⚠️ لا توجد إشارات مسجلة"
 
         return (
             "✦✦✦ 🚀 دخـــــول صفـــــقة ✦✦✦\n"
