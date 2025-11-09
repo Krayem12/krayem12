@@ -1,5 +1,6 @@
+# config/validators.py
 class ConfigValidator:
-    """Configuration validation class - UPDATED FOR NEW STRATEGY"""
+    """Configuration validation class - UPDATED FOR MULTI-MODE STRATEGY"""
     
     @staticmethod
     def validate_config(config):
@@ -18,24 +19,34 @@ class ConfigValidator:
         # التحقق من إعدادات الإشعارات
         warnings.extend(ConfigValidator.validate_notification_config(config))
         
-        # 🎯 NEW: التحقق من إعدادات الاستراتيجية
-        strategy_errors, strategy_warnings = ConfigValidator.validate_strategy_config(config)
+        # 🎯 MULTI-MODE: التحقق من إعدادات الاستراتيجية المتعددة
+        strategy_errors, strategy_warnings = ConfigValidator.validate_multi_mode_strategy_config(config)
         errors.extend(strategy_errors)
         warnings.extend(strategy_warnings)
         
         return errors, warnings
     
     @staticmethod
-    def validate_strategy_config(config):
-        """Validate new strategy configuration"""
+    def validate_multi_mode_strategy_config(config):
+        """Validate multi-mode strategy configuration"""
         errors = []
         warnings = []
         
-        # التحقق من TRADING_MODE
+        # التحقق من TRADING_MODE الأساسي
         valid_modes = ['GROUP1', 'GROUP1_GROUP2', 'GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3']
         trading_mode = config.get('TRADING_MODE')
         if trading_mode not in valid_modes:
             errors.append(f"❌ TRADING_MODE must be one of {valid_modes}")
+            
+        # التحقق من TRADING_MODE1
+        trading_mode1 = config.get('TRADING_MODE1')
+        if trading_mode1 not in valid_modes:
+            errors.append(f"❌ TRADING_MODE1 must be one of {valid_modes}")
+            
+        # التحقق من TRADING_MODE2
+        trading_mode2 = config.get('TRADING_MODE2')
+        if trading_mode2 not in valid_modes:
+            errors.append(f"❌ TRADING_MODE2 must be one of {valid_modes}")
             
         # التحقق من GROUP1_TREND_MODE
         valid_trend_modes = ['ONLY_TREND', 'ALLOW_COUNTER_TREND']
@@ -43,14 +54,24 @@ class ConfigValidator:
         if trend_mode not in valid_trend_modes:
             errors.append(f"❌ GROUP1_TREND_MODE must be one of {valid_trend_modes}")
             
-        # التحقق من أن المجموعات المطلوبة في TRADING_MODE مفعلة
-        if trading_mode in ['GROUP1_GROUP2', 'GROUP1_GROUP2_GROUP3']:
-            if not config.get('GROUP2_ENABLED'):
-                errors.append("❌ GROUP2 must be enabled for selected TRADING_MODE")
-                
-        if trading_mode in ['GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3']:
-            if not config.get('GROUP3_ENABLED'):
-                errors.append("❌ GROUP3 must be enabled for selected TRADING_MODE")
+        # 🎯 MULTI-MODE: التحقق من أن المجموعات المطلوبة في الأنماط مفعلة
+        if config.get('TRADING_MODE1_ENABLED'):
+            if trading_mode1 in ['GROUP1_GROUP2', 'GROUP1_GROUP2_GROUP3']:
+                if not config.get('GROUP2_ENABLED'):
+                    errors.append("❌ GROUP2 must be enabled for TRADING_MODE1 with GROUP2 requirement")
+                    
+            if trading_mode1 in ['GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3']:
+                if not config.get('GROUP3_ENABLED'):
+                    errors.append("❌ GROUP3 must be enabled for TRADING_MODE1 with GROUP3 requirement")
+                    
+        if config.get('TRADING_MODE2_ENABLED'):
+            if trading_mode2 in ['GROUP1_GROUP2', 'GROUP1_GROUP2_GROUP3']:
+                if not config.get('GROUP2_ENABLED'):
+                    errors.append("❌ GROUP2 must be enabled for TRADING_MODE2 with GROUP2 requirement")
+                    
+            if trading_mode2 in ['GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3']:
+                if not config.get('GROUP3_ENABLED'):
+                    errors.append("❌ GROUP3 must be enabled for TRADING_MODE2 with GROUP3 requirement")
                 
         # التحقق من أعداد التأكيدات
         if config.get('REQUIRED_CONFIRMATIONS_GROUP1', 0) <= 0:
@@ -87,7 +108,12 @@ class ConfigValidator:
                 errors.append("❌ TELEGRAM_BOT_TOKEN required when Telegram is enabled")
             if config.get('EXTERNAL_SERVER_ENABLED') and not config.get('EXTERNAL_SERVER_URL'):
                 errors.append("❌ EXTERNAL_SERVER_URL required when External Server is enabled")
-                
+        
+        # 🆕 التحقق من إعداد التنظيف الموحد
+        cleanup_interval = config.get('SIGNAL_CLEANUP_INTERVAL_MINUTES', 5)
+        if cleanup_interval < 1 or cleanup_interval > 60:
+            warnings.append("⚠️ SIGNAL_CLEANUP_INTERVAL_MINUTES should be between 1 and 60 minutes")
+            
         return errors, warnings
     
     @staticmethod

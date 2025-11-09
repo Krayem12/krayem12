@@ -4,25 +4,27 @@ import hashlib
 from datetime import datetime
 
 class SignalProcessor:
-    """Process and classify trading signals"""
+    """Process and classify trading signals with 100% STRICT EXACT MATCH only"""
 
     def __init__(self, config, signals, keywords):
         self.config = config
         self.signals = signals
-        self.keywords = keywords
+        self.keywords = keywords  # 🚨 نحتفظ بها ولكن لا نستخدمها
         self.signal_index = {}
         self.setup_signal_index()
+        print("🎯 نظام التصنيف الصارم مفعل - التطابق التام 100% فقط")
 
     def setup_signal_index(self):
         """Optimized signal lookup index for better performance"""
         for category, signal_list in self.signals.items():
             for signal in signal_list:
-                normalized = signal.lower().strip().replace(' ', '')
+                normalized = signal.lower().strip()
                 self.signal_index[normalized] = category
-                self.signal_index[signal] = category
+                # تسجيل جميع الإشارات المعروفة
+                print(f"   📝 مسجل: '{signal}' → {category}")
 
     def extract_signal(self, request):
-        """Extract signal from request with IMPROVED error handling"""
+        """Extract signal from request"""
         content_type = (request.headers.get('Content-Type') or '').lower()
 
         if 'application/json' in content_type:
@@ -69,86 +71,102 @@ class SignalProcessor:
             return None
 
     def classify_signal(self, signal_data):
-        """Optimized signal classification with IMPROVED TREND detection"""
+        """🎯 100% STRICT EXACT MATCH CLASSIFICATION - NO KEYWORDS, NO PARTIAL MATCHES"""
         if not signal_data or 'signal_type' not in signal_data:
+            print("❌ لا توجد بيانات إشارة أو نوع إشارة")
             return 'unknown'
 
         signal_type = signal_data['signal_type']
-        signal_lower = signal_type.lower()
+        signal_lower = signal_type.lower().strip()
         
-        # HIGHEST PRIORITY: Check for trend signals FIRST - EXACT MATCH ONLY
-        trend_signals = self.signals.get('trend', [])
+        print(f"🔍 تحليل الإشارة: '{signal_type}'")
+        
+        # 🎯 100% STRICT EXACT MATCH: Convert all signals to lowercase for exact comparison
+        trend_signals = [s.lower().strip() for s in self.signals.get('trend', [])]
+        trend_confirm_signals = [s.lower().strip() for s in self.signals.get('trend_confirm', [])]
+        exit_signals = [s.lower().strip() for s in self.signals.get('exit', [])]
+        group1_bullish_signals = [s.lower().strip() for s in self.signals.get('entry_bullish', [])]
+        group1_bearish_signals = [s.lower().strip() for s in self.signals.get('entry_bearish', [])]
+        group2_bullish_signals = [s.lower().strip() for s in self.signals.get('entry_bullish1', [])]
+        group2_bearish_signals = [s.lower().strip() for s in self.signals.get('entry_bearish1', [])]
+        group3_signals = [s.lower().strip() for s in self.signals.get('group3', [])]
+
+        # 🎯 HIGHEST PRIORITY: Check for trend signals - 100% EXACT MATCH ONLY
         for trend_signal in trend_signals:
-            trend_signal_lower = trend_signal.lower()
-            # التطابق التام فقط لإشارات الاتجاه
-            if trend_signal_lower == signal_lower:
-                print(f"🎯 تم التصنيف كإشارة اتجاه: '{signal_type}' يطابق إشارة الاتجاه '{trend_signal}'")
+            if trend_signal == signal_lower:
+                print(f"🎯 تم التصنيف كإشارة اتجاه (تطابق تام 100%): '{signal_type}' → 'trend'")
                 return 'trend'
         
-        # Check for trend confirmation signals - EXACT MATCH ONLY
-        trend_confirm_signals = self.signals.get('trend_confirm', [])
+        # 🎯 Check for trend confirmation signals - 100% EXACT MATCH ONLY
         for trend_confirm_signal in trend_confirm_signals:
-            trend_confirm_lower = trend_confirm_signal.lower()
-            if trend_confirm_lower == signal_lower:
-                print(f"🎯 تم التصنيف كتأكيد اتجاه: '{signal_type}' يطابق إشارة تأكيد الاتجاه '{trend_confirm_signal}'")
+            if trend_confirm_signal == signal_lower:
+                print(f"🎯 تم التصنيف كتأكيد اتجاه (تطابق تام 100%): '{signal_type}' → 'trend_confirm'")
                 return 'trend_confirm'
 
-        # Then check for exit signals
-        exit_signals = self.signals.get('exit', [])
+        # 🎯 Check for exit signals - 100% EXACT MATCH ONLY
         for exit_signal in exit_signals:
-            if exit_signal.lower() in signal_lower:
-                print(f"🎯 تم التصنيف كإشارة خروج: '{signal_type}'")
+            if exit_signal == signal_lower:
+                print(f"🎯 تم التصنيف كإشارة خروج (تطابق تام 100%): '{signal_type}' → 'exit'")
                 return 'exit'
-                
-        if any(kw in signal_lower for kw in self.keywords['exit']):
-            print(f"🎯 تم التصنيف كإشارة خروج: '{signal_type}'")
-            return 'exit'
 
-        # Then check for entry signals - ONLY if not already classified as trend
-        # Check group1 signals first (exact matches)
-        group1_bullish_signals = self.signals.get('entry_bullish', [])
-        group1_bearish_signals = self.signals.get('entry_bearish', [])
-        
+        # 🎯 Check group1 signals - 100% EXACT MATCH ONLY
         for signal in group1_bullish_signals:
-            if signal.lower() in signal_lower:
-                print(f"🎯 تم التصنيف كدخول صاعد (مجموعة1): '{signal_type}'")
+            if signal == signal_lower:
+                print(f"🎯 تم التصنيف كدخول صاعد (مجموعة1 - تطابق تام 100%): '{signal_type}' → 'entry_bullish'")
                 return 'entry_bullish'
                 
         for signal in group1_bearish_signals:
-            if signal.lower() in signal_lower:
-                print(f"🎯 تم التصنيف كدخول هابط (مجموعة1): '{signal_type}'")
+            if signal == signal_lower:
+                print(f"🎯 تم التصنيف كدخول هابط (مجموعة1 - تطابق تام 100%): '{signal_type}' → 'entry_bearish'")
                 return 'entry_bearish'
 
-        # Check group2 signals
-        group2_bullish_signals = self.signals.get('entry_bullish1', [])
-        group2_bearish_signals = self.signals.get('entry_bearish1', [])
-        
+        # 🎯 Check group2 signals - 100% EXACT MATCH ONLY
         for signal in group2_bullish_signals:
-            if signal.lower() in signal_lower:
-                print(f"🎯 تم التصنيف كدخول صاعد (مجموعة2): '{signal_type}'")
+            if signal == signal_lower:
+                print(f"🎯 تم التصنيف كدخول صاعد (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bullish1'")
                 return 'entry_bullish1'
                 
         for signal in group2_bearish_signals:
-            if signal.lower() in signal_lower:
-                print(f"🎯 تم التصنيف كدخول هابط (مجموعة2): '{signal_type}'")
+            if signal == signal_lower:
+                print(f"🎯 تم التصنيف كدخول هابط (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bearish1'")
                 return 'entry_bearish1'
 
-        # Check group3 signals
-        if self.config['GROUP3_ENABLED']:
-            group3_signals = self.signals.get('group3', [])
-            for group3_signal in group3_signals:
-                if group3_signal.lower() in signal_lower:
-                    print(f"🎯 تم التصنيف كمجموعة ثالثة: '{signal_type}' يطابق إشارة المجموعة الثالثة '{group3_signal}'")
-                    return 'group3'
+        # 🎯 Check group3 signals - 100% EXACT MATCH ONLY
+        for group3_signal in group3_signals:
+            if group3_signal == signal_lower:
+                print(f"🎯 تم التصنيف كمجموعة ثالثة (تطابق تام 100%): '{signal_type}' → 'group3'")
+                return 'group3'
 
-        # Finally, check general keywords only if no exact matches found
-        if any(kw in signal_lower for kw in self.keywords['bullish']):
-            print(f"🎯 تم التصنيف كدخول صاعد (كلمات مفتاحية): '{signal_type}'")
-            return 'entry_bullish'
-
-        if any(kw in signal_lower for kw in self.keywords['bearish']):
-            print(f"🎯 تم التصنيف كدخول هابط (كلمات مفتاحية): '{signal_type}'")
-            return 'entry_bearish'
-
-        print(f"⚠️ نوع إشارة غير معروف: '{signal_type}'")
+        # 🚫 NO FALLBACK - NO KEYWORD MATCHING - NO PARTIAL MATCHING
+        print(f"❌ نوع إشارة غير معروف (لا يوجد تطابق تام 100%): '{signal_type}'")
+        print(f"📋 الإشارات المعروفة في المجموعات:")
+        print(f"   🔴 مجموعة1 صاعد: {group1_bullish_signals}")
+        print(f"   🔴 مجموعة1 هابط: {group1_bearish_signals}")
+        print(f"   🔵 مجموعة2 صاعد: {group2_bullish_signals}")
+        print(f"   🔵 مجموعة2 هابط: {group2_bearish_signals}")
+        print(f"   🟢 مجموعة3: {group3_signals}")
+        
         return 'unknown'
+
+    def validate_signal_strict(self, signal_type):
+        """🎯 التحقق الصارم من وجود الإشارة في أي قائمة"""
+        signal_lower = signal_type.lower().strip()
+        
+        # التحقق في جميع القوائم
+        all_categories = {
+            'trend': self.signals.get('trend', []),
+            'trend_confirm': self.signals.get('trend_confirm', []),
+            'exit': self.signals.get('exit', []),
+            'entry_bullish': self.signals.get('entry_bullish', []),
+            'entry_bearish': self.signals.get('entry_bearish', []),
+            'entry_bullish1': self.signals.get('entry_bullish1', []),
+            'entry_bearish1': self.signals.get('entry_bearish1', []),
+            'group3': self.signals.get('group3', [])
+        }
+        
+        for category, signals in all_categories.items():
+            signal_list = [s.lower().strip() for s in signals]
+            if signal_lower in signal_list:
+                return True, category
+                
+        return False, None

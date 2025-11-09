@@ -1,4 +1,6 @@
 # core/trade_manager.py
+from datetime import datetime
+
 class TradeManager:
 
     def __init__(self, config):
@@ -39,7 +41,7 @@ class TradeManager:
         
         print(f"📈 تم تحديث الاتجاه: {symbol} -> {direction.upper()} (سابقاً: {old_trend})")
         
-        # التحقق مما إذا كان التغيير يستحق الإبلاع
+        # التحقق مما إذا كان التغيير يستحق الإبلاغ
         should_report = self._should_report_trend_change(symbol, direction, old_trend)
         
         # إغلاق الصفقات المخالفة للاتجاه الجديد
@@ -93,8 +95,8 @@ class TradeManager:
         for trade_id in trades_to_close:
             self.close_trade(trade_id)
 
-    def open_trade(self, symbol, direction):
-        """فتح صفقة جديدة مع إصلاح العداد"""
+    def open_trade(self, symbol, direction, strategy_type="GROUP1", mode_key="TRADING_MODE"):
+        """فتح صفقة جديدة مع إضافة نوع الاستراتيجية والنمط"""
         # التحقق من الحد الأقصى للصفقات الإجمالي
         if len(self.active_trades) >= self.config['MAX_OPEN_TRADES']:
             print(f"❌ تجاوز الحد الأقصى للصفقات المفتوحة: {self.config['MAX_OPEN_TRADES']}")
@@ -111,11 +113,14 @@ class TradeManager:
 
         # 🆕 إصلاح إنشاء معرف الصفقة
         self.total_trade_counter += 1
-        trade_id = f"{symbol}_{self.total_trade_counter}"
+        trade_id = f"{symbol}_{mode_key}_{self.total_trade_counter}"
         
         self.active_trades[trade_id] = {
             "symbol": symbol, 
             "side": direction,
+            "strategy_type": strategy_type,
+            "mode_key": mode_key,
+            "trade_type": self._get_trade_type(mode_key),  # نوع الصفقة (أساسي، نمط1، نمط2)
             "opened_at": self._get_current_timestamp()
         }
         
@@ -123,17 +128,29 @@ class TradeManager:
         self.symbol_trade_count[symbol] += 1
         self.metrics["trades_opened"] += 1
         
-        print(f"🚀 فتح صفقة: {symbol} | الاتجاه: {direction.upper()} | معرف الصفقة: {trade_id}")
+        print(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type} | الاتجاه: {direction.upper()}")
         print(f"📊 صفقات {symbol}: {self.symbol_trade_count[symbol]}/{self.config['MAX_TRADES_PER_SYMBOL']}")
         print(f"📊 الصفقات الإجمالية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
         
         return True
 
+    def _get_trade_type(self, mode_key):
+        """تحديد نوع الصفقة بناءً على المفتاح"""
+        trade_types = {
+            'TRADING_MODE': 'أساسي',
+            'TRADING_MODE1': 'نمط_1', 
+            'TRADING_MODE2': 'نمط_2'
+        }
+        return trade_types.get(mode_key, 'أساسي')
+
     def close_trade(self, trade_id):
         """إغلاق صفقة مع تحديث العداد"""
         if trade_id in self.active_trades:
             symbol = self.active_trades[trade_id]["symbol"]
-            print(f"✅ تم إغلاق الصفقة: {trade_id}")
+            mode_key = self.active_trades[trade_id].get("mode_key", "TRADING_MODE")
+            strategy_type = self.active_trades[trade_id].get("strategy_type", "GROUP1")
+            
+            print(f"✅ تم إغلاق الصفقة: {trade_id} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
             
             # 🆕 تحديث العداد عند الإغلاق
             if symbol in self.symbol_trade_count:
@@ -156,7 +173,8 @@ class TradeManager:
         
         for trade_id, trade in list(self.active_trades.items()):
             if trade["symbol"] == symbol:
-                print(f"📤 إشارة خروج -> إغلاق الصفقة: {trade_id}")
+                mode_key = trade.get("mode_key", "TRADING_MODE")
+                print(f"📤 إشارة خروج -> إغلاق الصفقة: {trade_id} | النمط: {mode_key}")
                 if self.close_trade(trade_id):
                     trades_closed += 1
         

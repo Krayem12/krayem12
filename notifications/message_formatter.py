@@ -5,7 +5,7 @@
 from datetime import datetime
 
 class MessageFormatter:
-    """فئة متخصصة في تنسيق رسائل النظام - UPDATED WITH CORRECT TREND DISPLAY"""
+    """فئة متخصصة في تنسيق رسائل النظام - UPDATED WITH STRICT STRATEGY FILTERING"""
 
     @staticmethod
     def format_trend_message(signal_data, new_trend, old_trend):
@@ -40,8 +40,8 @@ class MessageFormatter:
     @staticmethod
     def format_detailed_entry_message(symbol, signal_type, direction, current_trend, strategy_type, 
                                     group1_signals, group2_signals, group3_signals, 
-                                    active_for_symbol, total_active, config):
-        """Format detailed entry message with ALL signals information - FIXED VERSION"""
+                                    active_for_symbol, total_active, config, mode_key="TRADING_MODE"):
+        """🎯 Format detailed entry message with STRICT FILTERED signals based on strategy"""
         timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
 
         trend_icon = '🟢📈 BULLISH' if current_trend.lower() == 'bullish' else '🔴📉 BEARISH'
@@ -51,43 +51,28 @@ class MessageFormatter:
             (direction == 'sell' and current_trend.lower() == 'bearish')
         ) else '🔴 غير مطابق'
 
-        # تحديد نص الاستراتيجية
-        strategy_text = strategy_type  # استخدام النص الفعلي من النظام
+        # 🎯 تحديد نوع الصفقة
+        trade_types = {
+            'TRADING_MODE': '🟦 أساسي',
+            'TRADING_MODE1': '🟨 نمط 1', 
+            'TRADING_MODE2': '🟪 نمط 2'
+        }
+        trade_type = trade_types.get(mode_key, '🟦 أساسي')
 
-        # 🎯 إصلاح: عرض جميع الإشارات الفعلية بغض النظر عن الاستراتيجية
-        signals_display = ""
-        
-        # عرض إشارات المجموعة الأولى إذا كانت موجودة
-        if group1_signals:
-            numbered_group1 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group1_signals)]
-            signals_display += f"┃ 🔴 إشارات المجموعة الأولى ({len(group1_signals)}):\n" + "\n".join(numbered_group1)
-        
-        # عرض إشارات المجموعة الثانية إذا كانت موجودة
-        if group2_signals:
-            if signals_display:
-                signals_display += "\n"
-            numbered_group2 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group2_signals)]
-            signals_display += f"┃ 🔵 إشارات المجموعة الثانية ({len(group2_signals)}):\n" + "\n".join(numbered_group2)
-        
-        # عرض إشارات المجموعة الثالثة إذا كانت موجودة
-        if group3_signals:
-            if signals_display:
-                signals_display += "\n"
-            numbered_group3 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group3_signals)]
-            signals_display += f"┃ 🟢 إشارات المجموعة الثالثة ({len(group3_signals)}):\n" + "\n".join(numbered_group3)
-        
-        # إذا لم توجد أي إشارات (حالة طارئة)
-        if not signals_display:
-            signals_display = "┃   ⚠️ لا توجد إشارات مسجلة"
+        # 🎯 الجديد: تصفية الإشارات الصارمة حسب الاستراتيجية الفعلية
+        signals_display = MessageFormatter._filter_signals_by_strategy_strict(
+            strategy_type, group1_signals, group2_signals, group3_signals
+        )
 
         return (
             "✦✦✦ 🚀 دخـــــول صفـــــقة ✦✦✦\n"
             "┏━━━━━━━━━━━━━━━━━━━━\n"
             f"┃ 💰 الرمز: {symbol}\n"
-            f"┃ 🎯 نوع الصفقة: {'🟢 شراء' if direction=='buy' else '🔴 بيع'}\n"
+            f"┃ 🎯 نوع الصفقة: {trade_type}\n"
+            f"┃ 🎯 نوع العملية: {'🟢 شراء' if direction=='buy' else '🔴 بيع'}\n"
             f"┃ 📊 اتجاه الرمز: {trend_icon}\n"
             f"┃ 🎯 محاذاة الاتجاه: {align_text}\n"
-            f"┃ 🎯 الاستراتيجية: {strategy_text}\n"
+            f"┃ 🎯 الاستراتيجية: {strategy_type}\n"
             f"┃ 📋 الإشارة الرئيسية: {signal_type}\n"
             f"{signals_display}\n"
             f"┃ 📊 صفقات {symbol}: {active_for_symbol}/{config['MAX_TRADES_PER_SYMBOL']}\n"
@@ -95,6 +80,56 @@ class MessageFormatter:
             "┗━━━━━━━━━━━━━━━━━━━━\n"
             f"🕐 {timestamp}"
         )
+
+    @staticmethod
+    def _filter_signals_by_strategy_strict(strategy_type, group1_signals, group2_signals, group3_signals):
+        """🎯 دالة جديدة: تصفية صارمة للإشارات حسب الاستراتيجية الفعلية"""
+        
+        # نسخ القوائم لتجنب التعديل على الأصل
+        filtered_group1 = group1_signals.copy() if group1_signals else []
+        filtered_group2 = group2_signals.copy() if group2_signals else []
+        filtered_group3 = group3_signals.copy() if group3_signals else []
+        
+        # 🎯 تطبيق التصفية الصارمة حسب الاستراتيجية
+        if strategy_type == 'GROUP1':
+            # GROUP1 فقط - إخفاء GROUP2 و GROUP3
+            filtered_group2 = []
+            filtered_group3 = []
+        elif strategy_type == 'GROUP1_GROUP2':
+            # GROUP1 و GROUP2 فقط - إخفاء GROUP3
+            filtered_group3 = []
+        elif strategy_type == 'GROUP1_GROUP3':
+            # GROUP1 و GROUP3 فقط - إخفاء GROUP2
+            filtered_group2 = []
+        # GROUP1_GROUP2_GROUP3 تظهر جميع الإشارات
+        
+        # بناء العرض مع الإشارات المصفاة فقط
+        display = ""
+        
+        # عرض إشارات المجموعة الأولى إذا كانت موجودة ومطلوبة
+        if filtered_group1:
+            numbered_group1 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(filtered_group1)]
+            display += f"┃ 🔴 إشارات المجموعة الأولى ({len(filtered_group1)}):\n" + "\n".join(numbered_group1)
+        
+        # عرض إشارات المجموعة الثانية إذا كانت موجودة ومطلوبة
+        if filtered_group2:
+            if display:  # إضافة سطر فاصل إذا كان هناك إشارات سابقة
+                display += "\n"
+            numbered_group2 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(filtered_group2)]
+            display += f"┃ 🔵 إشارات المجموعة الثانية ({len(filtered_group2)}):\n" + "\n".join(numbered_group2)
+        
+        # عرض إشارات المجموعة الثالثة إذا كانت موجودة ومطلوبة
+        if filtered_group3:
+            if display:  # إضافة سطر فاصل إذا كان هناك إشارات سابقة
+                display += "\n"
+            numbered_group3 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(filtered_group3)]
+            display += f"┃ 🟢 إشارات المجموعة الثالثة ({len(filtered_group3)}):\n" + "\n".join(numbered_group3)
+        
+        # إذا لم توجد أي إشارات بعد التصفية
+        if not display:
+            display = "┃   ⚠️ لا توجد إشارات مسجلة"
+        
+        return display
 
     @staticmethod
     def format_exit_message(symbol, signal_type, active_for_symbol, total_active, config):

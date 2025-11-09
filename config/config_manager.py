@@ -19,7 +19,7 @@ class ConfigManager:
         self.setup_config()
 
     def setup_config(self):
-        """Final configuration setup with NEW STRATEGY SETTINGS"""
+        """Final configuration setup with MULTI-MODE TRADING SUPPORT"""
         self.config = {
             # Basic Settings
             'DEBUG': os.getenv('DEBUG', 'true').lower() == 'true',
@@ -38,9 +38,13 @@ class ConfigManager:
             'MAX_OPEN_TRADES': self._safe_int_convert('MAX_OPEN_TRADES', 10),
             'MAX_TRADES_PER_SYMBOL': self._safe_int_convert('MAX_TRADES_PER_SYMBOL', 3),
 
-            # 🎯 NEW: Trading Strategy Settings
+            # 🎯 MULTI-MODE Trading Strategy Settings
             'TRADING_MODE': os.getenv('TRADING_MODE', 'GROUP1_GROUP2_GROUP3').strip().upper(),
-            
+            'TRADING_MODE1': os.getenv('TRADING_MODE1', 'GROUP1').strip().upper(),
+            'TRADING_MODE2': os.getenv('TRADING_MODE2', 'GROUP1').strip().upper(),
+            'TRADING_MODE1_ENABLED': os.getenv('TRADING_MODE1_ENABLED', 'false').lower() == 'true',
+            'TRADING_MODE2_ENABLED': os.getenv('TRADING_MODE2_ENABLED', 'false').lower() == 'true',
+
             # Group1 Settings
             'REQUIRED_CONFIRMATIONS_GROUP1': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP1', 2),
             'GROUP1_TREND_MODE': os.getenv('GROUP1_TREND_MODE', 'ONLY_TREND').strip().upper(),
@@ -52,6 +56,9 @@ class ConfigManager:
             # Group3 Settings
             'GROUP3_ENABLED': os.getenv('GROUP3_ENABLED', 'true').lower() == 'true',
             'REQUIRED_CONFIRMATIONS_GROUP3': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP3', 1),
+
+            # 🆕 إعداد واحد لتحكم بفترة التنظيف
+            'SIGNAL_CLEANUP_INTERVAL_MINUTES': self._safe_int_convert('SIGNAL_CLEANUP_INTERVAL_MINUTES', 5),
 
             # Trend Settings
             'RESPECT_TREND_FOR_REGULAR_TRADES': os.getenv('RESPECT_TREND_FOR_REGULAR_TRADES', 'true').lower() == 'true',
@@ -65,12 +72,6 @@ class ConfigManager:
             'SEND_EXIT_MESSAGES': os.getenv('SEND_EXIT_MESSAGES', 'true').lower() == 'true',
             'SEND_CONFIRMATION_MESSAGES': os.getenv('SEND_CONFIRMATION_MESSAGES', 'false').lower() == 'true',
             'SEND_GENERAL_MESSAGES': os.getenv('SEND_GENERAL_MESSAGES', 'false').lower() == 'true',
-            'SEND_BULLISH_SIGNALS': os.getenv('SEND_BULLISH_SIGNALS', 'true').lower() == 'true',
-            'SEND_BEARISH_SIGNALS': os.getenv('SEND_BEARISH_SIGNALS', 'true').lower() == 'true',
-
-            # Timeout Settings
-            'CONFIRMATION_TIMEOUT': self._safe_int_convert('CONFIRMATION_TIMEOUT', 900),
-            'DUAL_CONFIRMATION_TIMEOUT': self._safe_int_convert('DUAL_CONFIRMATION_TIMEOUT', 3600),
 
             # Daily Cleanup Settings
             'DAILY_CLEANUP_ENABLED': os.getenv('DAILY_CLEANUP_ENABLED', 'true').lower() == 'true',
@@ -152,22 +153,25 @@ class ConfigManager:
             return [s.strip() for s in default_signals.split(',') if s.strip()]
 
     def setup_keywords(self):
-        """Setup keywords from .env"""
-        bullish_kw = os.getenv('BULLISH_KEYWORDS', 'bullish,buy,long,call,up,upside')
-        bearish_kw = os.getenv('BEARISH_KEYWORDS', 'bearish,sell,short,put,down,downside')
-        trend_kw = os.getenv('TREND_KEYWORDS', 'catcher')
-        trend_confirm_kw = os.getenv('TREND_CONFIRM_KEYWORDS', 'tracer')
-        exit_kw = os.getenv('EXIT_KEYWORDS', 'exit,close,take profit,stop loss')
-        group3_kw = os.getenv('GROUP3_KEYWORDS', 'moneyflow_above_50,moneyflow_below_50,SPX500')
+        """🎯 إعداد الكلمات المفتاحية - للتوافق فقط ولكن لا تستخدم"""
+        # 🚨 هذه الكلمات لا تستخدم في التصنيف بعد الآن
+        bullish_kw = os.getenv('BULLISH_KEYWORDS', '')
+        bearish_kw = os.getenv('BEARISH_KEYWORDS', '')
+        trend_kw = os.getenv('TREND_KEYWORDS', '')
+        trend_confirm_kw = os.getenv('TREND_CONFIRM_KEYWORDS', '')
+        exit_kw = os.getenv('EXIT_KEYWORDS', '')
+        group3_kw = os.getenv('GROUP3_KEYWORDS', '')
 
         self.keywords = {
-            'bullish': [kw.strip() for kw in bullish_kw.split(',')],
-            'bearish': [kw.strip() for kw in bearish_kw.split(',')],
-            'trend': [kw.strip() for kw in trend_kw.split(',')],
-            'trend_confirm': [kw.strip() for kw in trend_confirm_kw.split(',')],
-            'exit': [kw.strip() for kw in exit_kw.split(',')],
-            'group3': [kw.strip() for kw in group3_kw.split(',')]
+            'bullish': [kw.strip() for kw in bullish_kw.split(',') if kw.strip()],
+            'bearish': [kw.strip() for kw in bearish_kw.split(',') if kw.strip()],
+            'trend': [kw.strip() for kw in trend_kw.split(',') if kw.strip()],
+            'trend_confirm': [kw.strip() for kw in trend_confirm_kw.split(',') if kw.strip()],
+            'exit': [kw.strip() for kw in exit_kw.split(',') if kw.strip()],
+            'group3': [kw.strip() for kw in group3_kw.split(',') if kw.strip()]
         }
+        
+        print("🚨 ملاحظة: نظام الكلمات المفتاحية غير مفعل - التطابق التام فقط")
 
     def validate_configuration(self):
         """Validate system configuration"""
@@ -196,9 +200,12 @@ class ConfigManager:
         if self.config['DAILY_CLEANUP_ENABLED']:
             print(f"   🕐 Cleanup Time: {self.config['DAILY_CLEANUP_TIME']}")
         
-        # 🎯 NEW: Display Strategy Settings
-        print("   🎯 Trading Strategy:")
+        # 🎯 MULTI-MODE: Display Multi-Mode Strategy Settings
+        print("   🎯 Multi-Mode Trading Strategy:")
         print(f"      • Mode: {self.config['TRADING_MODE']}")
+        print(f"      • Mode1: {self.config['TRADING_MODE1']} ({'✅ ENABLED' if self.config['TRADING_MODE1_ENABLED'] else '❌ DISABLED'})")
+        print(f"      • Mode2: {self.config['TRADING_MODE2']} ({'✅ ENABLED' if self.config['TRADING_MODE2_ENABLED'] else '❌ DISABLED'})")
+        
         print(f"      • Group1 Trend Mode: {self.config['GROUP1_TREND_MODE']}")
         print(f"      • Required Group1: {self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
         print(f"      • Group2 Enabled: {'✅ YES' if self.config['GROUP2_ENABLED'] else '❌ NO'}")
@@ -207,6 +214,12 @@ class ConfigManager:
         print(f"      • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
         if self.config['GROUP3_ENABLED']:
             print(f"      • Required Group3: {self.config['REQUIRED_CONFIRMATIONS_GROUP3']}")
+        
+        # 🆕 عرض إعدادات التنظيف الموحدة
+        print("   ⚙️ Cleanup Settings:")
+        cleanup_interval = self.config['SIGNAL_CLEANUP_INTERVAL_MINUTES']
+        print(f"      • Cleanup Interval: {cleanup_interval} minutes")
+        print(f"      • Signal Max Age: {cleanup_interval * 3} minutes (تلقائي)")
         
         print("   📊 Message Controls:")
         print("      • Trend Messages:", "✅ ON" if self.config['SEND_TREND_MESSAGES'] else "❌ OFF")

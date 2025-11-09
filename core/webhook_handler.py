@@ -4,7 +4,7 @@ import re
 from flask import request, jsonify
 
 class WebhookHandler:
-    """Webhook receiver for processing incoming alerts"""
+    """Webhook receiver for processing incoming alerts - UPDATED FOR MULTI-MODE"""
 
     def __init__(self, config, signal_processor, group_manager, trade_manager, notification_manager, cleanup_manager):
         self.config = config
@@ -156,39 +156,45 @@ class WebhookHandler:
                 
                 return jsonify({"status": "exit_processed", "symbol": symbol})
 
-            # ✅ إشارات الدخول (Group Manager Logic)
+            # ✅ إشارات الدخول (Group Manager Logic) - MULTI-MODE SUPPORT
             print(f"🎯 توجيه إشارة دخول إلى GroupManager: {symbol} -> {classification}")
             
-            trade_result = self.group_manager.route_signal(symbol, signal_data, classification)
+            # 🎯 MULTI-MODE: الحصول على قائمة بالصفقات المفتوحة
+            trade_results = self.group_manager.route_signal(symbol, signal_data, classification)
             
-            if trade_result and self.notification_manager.should_send_message('entry'):
+            # 🎯 MULTI-MODE: إرسال إشعار لكل صفقة مفتوحة
+            if trade_results and self.notification_manager.should_send_message('entry'):
                 from notifications.message_formatter import MessageFormatter
-                # trade_result الآن يحتوي على معلومات مفصلة عن الصفقة
-                current_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
-                active_for_symbol = self.trade_manager.get_active_trades_count(symbol)
-                total_active = self.trade_manager.get_active_trades_count()
                 
-                # استخدام الرسالة المفصلة
-                entry_message = MessageFormatter.format_detailed_entry_message(
-                    symbol=trade_result['symbol'],
-                    signal_type=signal_type,
-                    direction=trade_result['direction'],
-                    current_trend=current_trend,
-                    strategy_type=trade_result['strategy_type'],
-                    group1_signals=trade_result['group1_signals'],
-                    group2_signals=trade_result['group2_signals'],
-                    group3_signals=trade_result['group3_signals'],
-                    active_for_symbol=active_for_symbol,
-                    total_active=total_active,
-                    config=self.config
-                )
-                self.notification_manager.send_notifications(entry_message, 'entry')
+                for trade_result in trade_results:
+                    current_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
+                    active_for_symbol = self.trade_manager.get_active_trades_count(symbol)
+                    total_active = self.trade_manager.get_active_trades_count()
+                    
+                    # استخدام الرسالة المفصلة مع معلومات النمط
+                    entry_message = MessageFormatter.format_detailed_entry_message(
+                        symbol=trade_result['symbol'],
+                        signal_type=signal_type,
+                        direction=trade_result['direction'],
+                        current_trend=current_trend,
+                        strategy_type=trade_result['strategy_type'],
+                        group1_signals=trade_result['group1_signals'],
+                        group2_signals=trade_result['group2_signals'],
+                        group3_signals=trade_result['group3_signals'],
+                        active_for_symbol=active_for_symbol,
+                        total_active=total_active,
+                        config=self.config,
+                        mode_key=trade_result.get('mode_key', 'TRADING_MODE')  # 🎯 MULTI-MODE
+                    )
+                    self.notification_manager.send_notifications(entry_message, 'entry')
+                    print(f"📤 تم إرسال إشعار دخول للنمط: {trade_result.get('mode_key', 'TRADING_MODE')}")
 
             return jsonify({
                 "status": "entry_processed", 
                 "symbol": symbol, 
                 "classification": classification,
-                "trade_opened": bool(trade_result)
+                "trades_opened": len(trade_results),
+                "trade_modes": [trade.get('mode_key', 'TRADING_MODE') for trade in trade_results]
             })
 
         except Exception as e:
