@@ -19,7 +19,7 @@ class ConfigManager:
         self.setup_config()
 
     def setup_config(self):
-        """Final configuration setup with MULTI-MODE TRADING SUPPORT"""
+        """Final configuration setup with SEPARATE GROUP3 LISTS"""
         self.config = {
             # Basic Settings
             'DEBUG': os.getenv('DEBUG', 'true').lower() == 'true',
@@ -83,7 +83,7 @@ class ConfigManager:
         
         logger.setLevel(getattr(logging, self.config['LOG_LEVEL'], logging.INFO))
 
-        # تحميل الإشارات مع قيم افتراضية
+        # 🎯 تحميل الإشارات مع قوائم GROUP3 المنفصلة
         self.signals = {
             'trend': self._load_signal_list('TREND_SIGNALS', 'switch_bullish_catcher,switch_bearish_catcher,bullish_catcher,bearish_catcher'),
             'trend_confirm': self._load_signal_list('TREND_CONFIRM_SIGNALS', 'switch_bullish_tracer,switch_bearish_tracer'),
@@ -93,7 +93,9 @@ class ConfigManager:
             'general': self._load_signal_list('GENERAL_SIGNALS', 'krayem yhia alanizy'),
             'entry_bullish1': self._load_signal_list('ENTRY_SIGNALS_BULLISH1', 'Discount'),
             'entry_bearish1': self._load_signal_list('ENTRY_SIGNALS_BEARISH1', 'Premium'),
-            'group3': self._load_signal_list('ENTRY_SIGNALS_GROUP3', 'moneyflow_above_50,moneyflow_below_50')
+            # 🆕 قوائم GROUP3 المنفصلة للإشارات الصاعدة والهابطة
+            'group3_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BULLISH', 'moneyflow_above_50,moneyflow_co_50'),
+            'group3_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BEARISH', 'moneyflow_below_50,moneyflow_cu_50')
         }
 
         self.setup_keywords()
@@ -220,6 +222,12 @@ class ConfigManager:
         cleanup_interval = self.config['SIGNAL_CLEANUP_INTERVAL_MINUTES']
         print(f"      • Cleanup Interval: {cleanup_interval} minutes")
         print(f"      • Signal Max Age: {cleanup_interval * 3} minutes (تلقائي)")
+        
+        # 🆕 عرض إشارات GROUP3 المنفصلة
+        if self.config['GROUP3_ENABLED']:
+            print("   🟢 Group3 Signals:")
+            print(f"      • Bullish: {len(self.signals['group3_bullish'])} signals")
+            print(f"      • Bearish: {len(self.signals['group3_bearish'])} signals")
         
         print("   📊 Message Controls:")
         print("      • Trend Messages:", "✅ ON" if self.config['SEND_TREND_MESSAGES'] else "❌ OFF")

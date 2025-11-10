@@ -1,3 +1,4 @@
+# notifications/external_sender.py
 import requests
 
 class ExternalSender:

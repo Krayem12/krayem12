@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 from core.trading_system import TradingSystem
 

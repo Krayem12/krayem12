@@ -1,4 +1,4 @@
-
+# notifications/notification_manager.py
 import requests
 import logging
 

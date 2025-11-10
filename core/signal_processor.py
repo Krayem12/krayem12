@@ -71,7 +71,7 @@ class SignalProcessor:
             return None
 
     def classify_signal(self, signal_data):
-        """🎯 100% STRICT EXACT MATCH CLASSIFICATION - NO KEYWORDS, NO PARTIAL MATCHES"""
+        """🎯 100% STRICT EXACT MATCH CLASSIFICATION - مع معالجة GROUP3 المحسنة"""
         if not signal_data or 'signal_type' not in signal_data:
             print("❌ لا توجد بيانات إشارة أو نوع إشارة")
             return 'unknown'
@@ -81,6 +81,14 @@ class SignalProcessor:
         
         print(f"🔍 تحليل الإشارة: '{signal_type}'")
         
+        # 🛠️ الإصلاح: معالجة خاصة لإشارات GROUP3
+        # إزالة البوادئ bullish_ و bearish_ للتحقق من GROUP3
+        group3_signal_clean = signal_lower
+        if signal_lower.startswith('bullish_'):
+            group3_signal_clean = signal_lower.replace('bullish_', '')
+        elif signal_lower.startswith('bearish_'):
+            group3_signal_clean = signal_lower.replace('bearish_', '')
+        
         # 🎯 100% STRICT EXACT MATCH: Convert all signals to lowercase for exact comparison
         trend_signals = [s.lower().strip() for s in self.signals.get('trend', [])]
         trend_confirm_signals = [s.lower().strip() for s in self.signals.get('trend_confirm', [])]
@@ -89,7 +97,10 @@ class SignalProcessor:
         group1_bearish_signals = [s.lower().strip() for s in self.signals.get('entry_bearish', [])]
         group2_bullish_signals = [s.lower().strip() for s in self.signals.get('entry_bullish1', [])]
         group2_bearish_signals = [s.lower().strip() for s in self.signals.get('entry_bearish1', [])]
-        group3_signals = [s.lower().strip() for s in self.signals.get('group3', [])]
+        
+        # 🆕 GROUP3: قوائم منفصلة للإشارات الصاعدة والهابطة
+        group3_bullish_signals = [s.lower().strip() for s in self.signals.get('group3_bullish', [])]
+        group3_bearish_signals = [s.lower().strip() for s in self.signals.get('group3_bearish', [])]
 
         # 🎯 HIGHEST PRIORITY: Check for trend signals - 100% EXACT MATCH ONLY
         for trend_signal in trend_signals:
@@ -131,10 +142,15 @@ class SignalProcessor:
                 print(f"🎯 تم التصنيف كدخول هابط (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bearish1'")
                 return 'entry_bearish1'
 
-        # 🎯 Check group3 signals - 100% EXACT MATCH ONLY
-        for group3_signal in group3_signals:
-            if group3_signal == signal_lower:
-                print(f"🎯 تم التصنيف كمجموعة ثالثة (تطابق تام 100%): '{signal_type}' → 'group3'")
+        # 🎯 Check group3 signals - 100% EXACT MATCH ONLY WITH SEPARATE LISTS + CLEANED SIGNALS
+        for signal in group3_bullish_signals:
+            if signal == signal_lower or signal == group3_signal_clean:
+                print(f"🎯 تم التصنيف كمجموعة ثالثة صاعدة (تطابق تام 100%): '{signal_type}' → 'group3'")
+                return 'group3'
+                
+        for signal in group3_bearish_signals:
+            if signal == signal_lower or signal == group3_signal_clean:
+                print(f"🎯 تم التصنيف كمجموعة ثالثة هابطة (تطابق تام 100%): '{signal_type}' → 'group3'")
                 return 'group3'
 
         # 🚫 NO FALLBACK - NO KEYWORD MATCHING - NO PARTIAL MATCHING
@@ -144,13 +160,21 @@ class SignalProcessor:
         print(f"   🔴 مجموعة1 هابط: {group1_bearish_signals}")
         print(f"   🔵 مجموعة2 صاعد: {group2_bullish_signals}")
         print(f"   🔵 مجموعة2 هابط: {group2_bearish_signals}")
-        print(f"   🟢 مجموعة3: {group3_signals}")
+        print(f"   🟢 مجموعة3 صاعد: {group3_bullish_signals}")
+        print(f"   🟢 مجموعة3 هابط: {group3_bearish_signals}")
         
         return 'unknown'
 
     def validate_signal_strict(self, signal_type):
         """🎯 التحقق الصارم من وجود الإشارة في أي قائمة"""
         signal_lower = signal_type.lower().strip()
+        
+        # 🛠️ الإصلاح: معالجة خاصة لإشارات GROUP3
+        group3_signal_clean = signal_lower
+        if signal_lower.startswith('bullish_'):
+            group3_signal_clean = signal_lower.replace('bullish_', '')
+        elif signal_lower.startswith('bearish_'):
+            group3_signal_clean = signal_lower.replace('bearish_', '')
         
         # التحقق في جميع القوائم
         all_categories = {
@@ -161,12 +185,13 @@ class SignalProcessor:
             'entry_bearish': self.signals.get('entry_bearish', []),
             'entry_bullish1': self.signals.get('entry_bullish1', []),
             'entry_bearish1': self.signals.get('entry_bearish1', []),
-            'group3': self.signals.get('group3', [])
+            'group3_bullish': self.signals.get('group3_bullish', []),
+            'group3_bearish': self.signals.get('group3_bearish', [])
         }
         
         for category, signals in all_categories.items():
             signal_list = [s.lower().strip() for s in signals]
-            if signal_lower in signal_list:
+            if signal_lower in signal_list or (category.startswith('group3') and group3_signal_clean in signal_list):
                 return True, category
                 
         return False, None

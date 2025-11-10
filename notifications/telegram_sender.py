@@ -1,3 +1,4 @@
+# notifications/telegram_sender.py
 import requests
 
 class TelegramSender:

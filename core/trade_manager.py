@@ -1,5 +1,6 @@
 # core/trade_manager.py
 from datetime import datetime
+from typing import Dict, List
 
 class TradeManager:
 
@@ -28,13 +29,30 @@ class TradeManager:
             "trades_closed": 0
         }
 
+        # 🆕 مرجع إلى GroupManager (سيتم تعيينه لاحقاً)
+        self.group_manager = None
+
+        # 🆕 مرجع إلى NotificationManager (سيتم تعيينه لاحقاً)
+        self.notification_manager = None
+
+        # 🛠️ الإصلاح: خاصية جديدة لمنع الإشعارات المكررة
+        self._last_trend_notification = {}
+
+    def set_group_manager(self, group_manager):
+        """🆕 تعيين GroupManager للوصول المتبادل"""
+        self.group_manager = group_manager
+
+    def set_notification_manager(self, notification_manager):
+        """🆕 تعيين NotificationManager للإشعارات"""
+        self.notification_manager = notification_manager
+
     def update_trend(self, symbol, classification, signal_data):
-        """تحديث اتجاه السهم مع التحقق من الإشعارات"""
+        """تحديث اتجاه السهم مع التحقق من الإشعارات ومسح الإشارات المخالفة"""
         direction = "bullish" if "bullish" in signal_data['signal_type'].lower() else "bearish"
         
         # 🆕 حفظ الاتجاه السابق قبل التحديث
         old_trend = self.current_trend.get(symbol)
-        self.previous_trend[symbol] = old_trend  # 🆕 حفظ للعرض
+        self.previous_trend[symbol] = old_trend
         
         # تحديث الاتجاه الحالي
         self.current_trend[symbol] = direction
@@ -44,10 +62,149 @@ class TradeManager:
         # التحقق مما إذا كان التغيير يستحق الإبلاغ
         should_report = self._should_report_trend_change(symbol, direction, old_trend)
         
+        # 🆕 مسح الإشارات المخالفة للاتجاه الجديد وجمع التفاصيل
+        cleaning_details = self._clean_contrarian_signals(symbol, direction)
+        
         # إغلاق الصفقات المخالفة للاتجاه الجديد
         self.close_contrarian_trades(symbol, classification)
         
-        return should_report, old_trend  # 🆕 إرجاع الاتجاه السابق
+        # 🆕 إرسال إشعار تفصيلي عن تغيير الاتجاه والتنظيف (إذا كان متاحاً)
+        if should_report and cleaning_details and self.notification_manager:
+            self._send_detailed_trend_notification(symbol, direction, old_trend, cleaning_details, signal_data)
+        
+        return should_report, old_trend
+
+    def _clean_contrarian_signals(self, symbol: str, new_trend: str) -> Dict:
+        """🆕 مسح الإشارات المخالفة للاتجاه الجديد وإرجاع التفاصيل"""
+        try:
+            if not self.group_manager:
+                print(f"⚠️ GroupManager غير متوفر لتنظيف الإشارات لـ {symbol}")
+                return {}
+            
+            # تحديد اتجاه الإشارات التي يجب مسحها
+            direction_to_remove = 'bullish' if new_trend == 'bearish' else 'bearish'
+            
+            print(f"🧹 تنظيف إشارات {direction_to_remove} المخالفة للاتجاه {new_trend} لـ {symbol}")
+            
+            # 🆕 استدعاء GroupManager لمسح الإشارات المخالفة مع الحصول على التفاصيل
+            # استخدام الدالة الأساسية إذا كانت التفصيلية غير متاحة
+            if hasattr(self.group_manager, 'clean_contrarian_signals_detailed'):
+                cleaning_result = self.group_manager.clean_contrarian_signals_detailed(symbol, direction_to_remove)
+            else:
+                # استخدام الدالة الأساسية كبديل
+                removed_count = self.group_manager.clean_contrarian_signals(symbol, direction_to_remove)
+                cleaning_result = {'removed_count': removed_count, 'removed_signals': []}
+            
+            if cleaning_result and cleaning_result.get('removed_count', 0) > 0:
+                print(f"✅ تم مسح {cleaning_result['removed_count']} إشارة مخالفة لـ {symbol}")
+                return cleaning_result
+            else:
+                print(f"🔍 لا توجد إشارات مخالفة لمسحها لـ {symbol}")
+                return {}
+                
+        except Exception as e:
+            print(f"⚠️ خطأ في تنظيف الإشارات المخالفة: {e}")
+            return {}
+
+    def _send_detailed_trend_notification(self, symbol: str, new_trend: str, old_trend: str, cleaning_details: Dict, signal_data: Dict):
+        """🆕 إرسال إشعار تفصيلي عن تغيير الاتجاه والتنظيف - منع التكرار"""
+        try:
+            from notifications.message_formatter import MessageFormatter
+            
+            # 🛠️ الإصلاح: التحقق مما إذا كان قد تم الإرسال مسبقاً
+            notification_key = f"{symbol}_{new_trend}"
+            current_time = datetime.now()
+            
+            if (notification_key in self._last_trend_notification and 
+                (current_time - self._last_trend_notification[notification_key]).total_seconds() < 10):
+                print(f"🔇 منع إشعار مكرر لـ {symbol} - {new_trend}")
+                return
+            
+            # 🆕 الحصول على الإشارات المتبقية المتوافقة مع الاتجاه الجديد
+            remaining_signals = self._get_remaining_signals(symbol, new_trend)
+            
+            # 🆕 محاولة استخدام الدالة التفصيلية أولاً
+            try:
+                detailed_message = MessageFormatter.format_detailed_trend_message(
+                    symbol=symbol,
+                    new_trend=new_trend,
+                    old_trend=old_trend,
+                    trigger_signal=signal_data['signal_type'],
+                    removed_signals=cleaning_details.get('removed_signals', []),
+                    remaining_signals=remaining_signals,
+                    removed_count=cleaning_details.get('removed_count', 0)
+                )
+            except AttributeError:
+                # 🆕 إذا فشلت، استخدم الدالة الأساسية
+                print("⚠️ استخدام الدالة البديلة format_simple_trend_message")
+                detailed_message = MessageFormatter.format_simple_trend_message(
+                    symbol=symbol,
+                    new_trend=new_trend,
+                    old_trend=old_trend,
+                    trigger_signal=signal_data['signal_type']
+                )
+            
+            # إرسال الإشعار
+            if self.notification_manager and self.notification_manager.should_send_message('trend'):
+                self.notification_manager.send_notifications(detailed_message, 'trend')
+                
+                # 🛠️ حفظ معلومات آخر إشعار
+                self._last_trend_notification[notification_key] = current_time
+                
+                print(f"📤 تم إرسال إشعار تغيير الاتجاه التفصيلي لـ {symbol}")
+            else:
+                print(f"🔕 إشعارات الاتجاه معطلة - لم يتم إرسال الإشعار لـ {symbol}")
+                
+        except Exception as e:
+            print(f"⚠️ خطأ في إرسال إشعار تغيير الاتجاه التفصيلي: {e}")
+
+    def _get_remaining_signals(self, symbol: str, new_trend: str) -> List[Dict]:
+        """🆕 الحصول على الإشارات المتبقية المتوافقة مع الاتجاه الجديد"""
+        try:
+            if not self.group_manager:
+                return []
+            
+            group_key = symbol.upper().strip()
+            if group_key not in self.group_manager.pending_signals:
+                return []
+            
+            # تحديد المجموعات التي تتناسب مع الاتجاه الجديد
+            target_groups = []
+            if new_trend == 'bullish':
+                target_groups = ['group1_bullish', 'group2_bullish', 'group3_bullish']
+            else:
+                target_groups = ['group1_bearish', 'group2_bearish', 'group3_bearish']
+            
+            remaining_signals = []
+            for group_name in target_groups:
+                signals = self.group_manager.pending_signals[group_key][group_name]
+                for signal in signals:
+                    # تحديد اسم المجموعة بشكل مفهوم
+                    group_display_name = self._get_group_display_name(group_name)
+                    remaining_signals.append({
+                        'signal_type': signal['signal_type'],
+                        'group': group_display_name,
+                        'original_group': group_name,
+                        'timestamp': signal.get('timestamp', datetime.now())
+                    })
+            
+            return remaining_signals
+            
+        except Exception as e:
+            print(f"⚠️ خطأ في جمع الإشارات المتبقية: {e}")
+            return []
+
+    def _get_group_display_name(self, group_name: str) -> str:
+        """🆕 تحويل اسم المجموعة الداخلي إلى اسم مفهوم"""
+        group_mapping = {
+            'group1_bullish': '🟥 المجموعة 1 - صاعد',
+            'group1_bearish': '🟥 المجموعة 1 - هابط',
+            'group2_bullish': '🟦 المجموعة 2 - صاعد', 
+            'group2_bearish': '🟦 المجموعة 2 - هابط',
+            'group3_bullish': '🟩 المجموعة 3 - صاعد',
+            'group3_bearish': '🟩 المجموعة 3 - هابط'
+        }
+        return group_mapping.get(group_name, group_name)
 
     def _should_report_trend_change(self, symbol, new_trend, old_trend):
         """التحقق مما إذا كان تغيير الاتجاه يستحق الإبلاغ"""
@@ -72,9 +229,7 @@ class TradeManager:
         return self.previous_trend.get(symbol, "UNKNOWN")
 
     def close_contrarian_trades(self, symbol, classification):
-        """
-        إغلاق الصفقات المخالفة مباشرة عند تغيير الاتجاه
-        """
+        """إغلاق الصفقات المخالفة مباشرة عند تغيير الاتجاه"""
         if symbol not in self.current_trend:
             return
 
@@ -120,7 +275,7 @@ class TradeManager:
             "side": direction,
             "strategy_type": strategy_type,
             "mode_key": mode_key,
-            "trade_type": self._get_trade_type(mode_key),  # نوع الصفقة (أساسي، نمط1، نمط2)
+            "trade_type": self._get_trade_type(mode_key),
             "opened_at": self._get_current_timestamp()
         }
         
@@ -137,14 +292,14 @@ class TradeManager:
     def _get_trade_type(self, mode_key):
         """تحديد نوع الصفقة بناءً على المفتاح"""
         trade_types = {
-            'TRADING_MODE': 'أساسي',
-            'TRADING_MODE1': 'نمط_1', 
-            'TRADING_MODE2': 'نمط_2'
+            'TRADING_MODE': '🟦 أساسي',
+            'TRADING_MODE1': '🟨 نمط 1', 
+            'TRADING_MODE2': '🟪 نمط 2'
         }
-        return trade_types.get(mode_key, 'أساسي')
+        return trade_types.get(mode_key, '🟦 أساسي')
 
     def close_trade(self, trade_id):
-        """إغلاق صفقة مع تحديث العداد"""
+        """إغلاق صفقة مع تحديث العداد بشكل آمن"""
         if trade_id in self.active_trades:
             symbol = self.active_trades[trade_id]["symbol"]
             mode_key = self.active_trades[trade_id].get("mode_key", "TRADING_MODE")
@@ -152,9 +307,12 @@ class TradeManager:
             
             print(f"✅ تم إغلاق الصفقة: {trade_id} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
             
-            # 🆕 تحديث العداد عند الإغلاق
-            if symbol in self.symbol_trade_count:
-                self.symbol_trade_count[symbol] = max(0, self.symbol_trade_count[symbol] - 1)
+            # 🆕 تحديث العداد بشكل آمن
+            if symbol in self.symbol_trade_count and self.symbol_trade_count[symbol] > 0:
+                self.symbol_trade_count[symbol] -= 1
+            else:
+                # إذا كان العداد غير موجود أو صفر، نعيد تهيئته
+                self.symbol_trade_count[symbol] = 0
             
             del self.active_trades[trade_id]
             self.metrics["trades_closed"] += 1

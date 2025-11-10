@@ -4,7 +4,7 @@ import re
 from flask import request, jsonify
 
 class WebhookHandler:
-    """Webhook receiver for processing incoming alerts - UPDATED FOR MULTI-MODE"""
+    """Webhook receiver for processing incoming alerts - FIXED MESSAGE FORMATTER ISSUES"""
 
     def __init__(self, config, signal_processor, group_manager, trade_manager, notification_manager, cleanup_manager):
         self.config = config
@@ -65,17 +65,29 @@ class WebhookHandler:
 
             # 1) جرّب JSON أولاً
             data = None
+            json_parse_error = None
             try:
-                if raw:
+                if raw and raw.strip():
                     data = json.loads(raw)
-            except Exception:
+                    print(f"✅ تم تحليل JSON بنجاح: {list(data.keys())}")
+            except json.JSONDecodeError as e:
+                json_parse_error = f"خطأ في تحليل JSON: {e}"
+                print(f"❌ {json_parse_error}")
+                data = None
+            except Exception as e:
+                json_parse_error = f"خطأ غير متوقع في تحليل JSON: {e}"
+                print(f"❌ {json_parse_error}")
                 data = None
 
             # 2) تفكيك نصّي إذا لم يكن JSON
             if not data:
+                print("🔍 محاولة التحليل النصي...")
                 symbol, signal_type = self._parse_plaintext_alert(raw)
                 if not symbol or not signal_type:
-                    print("❌ لم يتمكن النظام من استخراج symbol أو signal_type من الرسالة")
+                    error_msg = "❌ لم يتمكن النظام من استخراج symbol أو signal_type من الرسالة"
+                    if json_parse_error:
+                        error_msg += f" (أخطاء JSON: {json_parse_error})"
+                    print(error_msg)
                     return jsonify({"error": "Invalid alert format"}), 400
                 data = {"symbol": symbol, "signal_type": signal_type}
 
@@ -115,21 +127,8 @@ class WebhookHandler:
                 # استخدام الدالة المعدلة التي ترجع ما إذا كان يجب الإبلاغ والاتجاه السابق
                 should_report, old_trend = self.trade_manager.update_trend(symbol, classification, signal_data)
                 
-                # إرسال الإشعارات فقط إذا كان هناك تغيير حقيقي في الاتجاه
-                if should_report and self.notification_manager.should_send_message('trend'):
-                    from notifications.message_formatter import MessageFormatter
-                    new_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
-                    
-                    # 🆕 استخدام الاتجاه السابق الحقيقي بدلاً من الاتجاه الحالي
-                    trend_message = MessageFormatter.format_trend_message(
-                        signal_data, 
-                        new_trend,
-                        old_trend or "UNKNOWN"  # 🆕 استخدام الاتجاه السابق الحقيقي
-                    )
-                    self.notification_manager.send_notifications(trend_message, 'trend')
-                    print(f"📤 تم إرسال إشعار تغيير الاتجاه لـ {symbol}: {old_trend} → {new_trend}")
-                else:
-                    print(f"🔇 لم يتم إرسال إشعار الاتجاه لـ {symbol} (لا تغيير حقيقي)")
+                # 🆕 إصلاح: استخدام معالجة آمنة للإشعارات
+                self._safe_send_trend_notification(symbol, signal_data, should_report, old_trend)
                 
                 return jsonify({
                     "status": "trend_processed", 
@@ -149,10 +148,18 @@ class WebhookHandler:
                     from notifications.message_formatter import MessageFormatter
                     active_for_symbol = self.trade_manager.get_active_trades_count(symbol)
                     total_active = self.trade_manager.get_active_trades_count()
-                    exit_message = MessageFormatter.format_exit_message(
-                        symbol, signal_type, active_for_symbol, total_active, self.config
-                    )
-                    self.notification_manager.send_notifications(exit_message, 'exit')
+                    
+                    # 🆕 استخدام معالجة آمنة
+                    try:
+                        exit_message = MessageFormatter.format_exit_message(
+                            symbol, signal_type, active_for_symbol, total_active, self.config
+                        )
+                        self.notification_manager.send_notifications(exit_message, 'exit')
+                    except Exception as e:
+                        print(f"⚠️ خطأ في تنسيق رسالة الخروج: {e}")
+                        # رسالة بديلة
+                        fallback_msg = f"🚪 إشارة خروج: {symbol} - {signal_type}"
+                        self.notification_manager.send_notifications(fallback_msg, 'exit')
                 
                 return jsonify({"status": "exit_processed", "symbol": symbol})
 
@@ -171,23 +178,50 @@ class WebhookHandler:
                     active_for_symbol = self.trade_manager.get_active_trades_count(symbol)
                     total_active = self.trade_manager.get_active_trades_count()
                     
-                    # استخدام الرسالة المفصلة مع معلومات النمط
-                    entry_message = MessageFormatter.format_detailed_entry_message(
-                        symbol=trade_result['symbol'],
-                        signal_type=signal_type,
-                        direction=trade_result['direction'],
-                        current_trend=current_trend,
-                        strategy_type=trade_result['strategy_type'],
-                        group1_signals=trade_result['group1_signals'],
-                        group2_signals=trade_result['group2_signals'],
-                        group3_signals=trade_result['group3_signals'],
-                        active_for_symbol=active_for_symbol,
-                        total_active=total_active,
-                        config=self.config,
-                        mode_key=trade_result.get('mode_key', 'TRADING_MODE')  # 🎯 MULTI-MODE
-                    )
-                    self.notification_manager.send_notifications(entry_message, 'entry')
-                    print(f"📤 تم إرسال إشعار دخول للنمط: {trade_result.get('mode_key', 'TRADING_MODE')}")
+                    # 🆕 استخدام معالجة آمنة
+                    try:
+                        # استخدام الرسالة المفصلة مع معلومات النمط
+                        entry_message = MessageFormatter.format_detailed_entry_message(
+                            symbol=trade_result['symbol'],
+                            signal_type=signal_type,
+                            direction=trade_result['direction'],
+                            current_trend=current_trend,
+                            strategy_type=trade_result['strategy_type'],
+                            group1_signals=trade_result.get('group1_signals', []),
+                            group2_signals=trade_result.get('group2_signals', []),
+                            group3_signals=trade_result.get('group3_signals', []),  # 🛠️ الإصلاح هنا
+                            active_for_symbol=active_for_symbol,
+                            total_active=total_active,
+                            config=self.config,
+                            mode_key=trade_result.get('mode_key', 'TRADING_MODE')
+                        )
+                        self.notification_manager.send_notifications(entry_message, 'entry')
+                        print(f"📤 تم إرسال إشعار دخول للنمط: {trade_result.get('mode_key', 'TRADING_MODE')}")
+                    except Exception as e:
+                        print(f"⚠️ خطأ في تنسيق رسالة الدخول: {e}")
+                        # 🛠️ محاولة استخدام الدالة الإصلاحية
+                        try:
+                            entry_message = MessageFormatter.format_detailed_entry_message_fixed(
+                                symbol=trade_result['symbol'],
+                                signal_type=signal_type,
+                                direction=trade_result['direction'],
+                                current_trend=current_trend,
+                                strategy_type=trade_result['strategy_type'],
+                                group1_signals=trade_result.get('group1_signals'),
+                                group2_signals=trade_result.get('group2_signals'),
+                                group3_signals=trade_result.get('group3_signals'),
+                                active_for_symbol=active_for_symbol,
+                                total_active=total_active,
+                                config=self.config,
+                                mode_key=trade_result.get('mode_key', 'TRADING_MODE')
+                            )
+                            self.notification_manager.send_notifications(entry_message, 'entry')
+                            print(f"✅ تم إرسال الإشعار باستخدام الدالة الإصلاحية")
+                        except Exception as e2:
+                            print(f"❌ فشل الإرسال بالدالة الإصلاحية: {e2}")
+                            # رسالة بديلة
+                            fallback_msg = f"🚀 دخول صفقة: {symbol} - {signal_type} - {trade_result['direction']} - النمط: {trade_result.get('mode_key', 'TRADING_MODE')}"
+                            self.notification_manager.send_notifications(fallback_msg, 'entry')
 
             return jsonify({
                 "status": "entry_processed", 
@@ -202,3 +236,43 @@ class WebhookHandler:
             print(f"💥 خطأ في معالجة الويب هووك: {e}")
             traceback.print_exc()
             return jsonify({"error": str(e)}), 500
+
+    def _safe_send_trend_notification(self, symbol: str, signal_data: dict, should_report: bool, old_trend: str):
+        """🆕 معالجة آمنة لإرسال إشعارات الاتجاه"""
+        try:
+            if should_report and self.notification_manager.should_send_message('trend'):
+                from notifications.message_formatter import MessageFormatter
+                
+                new_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
+                
+                # 🆕 محاولة استخدام الدالة الأساسية أولاً
+                try:
+                    trend_message = MessageFormatter.format_trend_message(
+                        signal_data, 
+                        new_trend,
+                        old_trend or "UNKNOWN"
+                    )
+                except AttributeError:
+                    # 🆕 إذا فشلت، استخدم الدالة المبسطة
+                    print("⚠️ استخدام الدالة البديلة format_simple_trend_message")
+                    trend_message = MessageFormatter.format_simple_trend_message(
+                        symbol=symbol,
+                        new_trend=new_trend,
+                        old_trend=old_trend or "UNKNOWN",
+                        trigger_signal=signal_data['signal_type']
+                    )
+                
+                self.notification_manager.send_notifications(trend_message, 'trend')
+                print(f"📤 تم إرسال إشعار تغيير الاتجاه لـ {symbol}: {old_trend} → {new_trend}")
+            else:
+                print(f"🔇 لم يتم إرسال إشعار الاتجاه لـ {symbol} (لا تغيير حقيقي أو إشعارات معطلة)")
+                
+        except Exception as e:
+            print(f"⚠️ خطأ في إرسال إشعار الاتجاه: {e}")
+            # محاولة إرسال رسالة بديلة بسيطة
+            try:
+                new_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
+                simple_msg = f"📊 تغيير الاتجاه: {symbol} | {old_trend} → {new_trend} | الإشارة: {signal_data['signal_type']}"
+                self.notification_manager.send_notifications(simple_msg, 'trend')
+            except:
+                print(f"❌ فشل إرسال الرسالة البديلة أيضًا")
