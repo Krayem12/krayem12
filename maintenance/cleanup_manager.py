@@ -4,7 +4,10 @@ import threading
 import time
 import os
 import json
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class CleanupManager:
     """إدارة عمليات التنظيف والجدولة"""
@@ -20,7 +23,7 @@ class CleanupManager:
         """Setup daily cleanup scheduler with IMPROVED reliability"""
         if self.config['DAILY_CLEANUP_ENABLED']:
             cleanup_time = self.config['DAILY_CLEANUP_TIME']
-            print(f"🕐 Daily cleanup scheduled at {cleanup_time} (server local time)")
+            logger.info(f"🕐 Daily cleanup scheduled at {cleanup_time} (server local time)")
 
             schedule.every().day.at(cleanup_time).do(self.daily_cleanup)
 
@@ -31,24 +34,24 @@ class CleanupManager:
             )
             self.scheduler_thread.start()
         else:
-            print("🔕 Daily cleanup disabled")
+            logger.info("🔕 Daily cleanup disabled")
 
     def run_scheduler(self):
         """Improved scheduler with shorter intervals and better error recovery"""
-        print("⏰ Scheduler thread started")
+        logger.info("⏰ Scheduler thread started")
         while True:
             try:
                 schedule.run_pending()
                 time.sleep(30)
             except Exception as e:
-                print(f"❌ Scheduler error: {e}")
+                logger.error(f"❌ Scheduler error: {e}")
                 time.sleep(60)
 
     def daily_cleanup(self):
         """Enhanced daily cleanup with backup verification - FIXED PERMISSIONS"""
-        print("\n" + "="*60)
-        print("🧹 STARTING DAILY CLEANUP - ENHANCED")
-        print("="*60)
+        logger.info("\n" + "="*60)
+        logger.info("🧹 STARTING DAILY CLEANUP - ENHANCED")
+        logger.info("="*60)
 
         # 🆕 إصلاح: استخدام الخصائص الفعلية الموجودة في TradeManager
         original_data = {
@@ -63,13 +66,13 @@ class CleanupManager:
             # 🆕 التحقق من إمكانية النسخ الاحتياطي أولاً
             can_backup = self._check_backup_possible()
             if not can_backup:
-                print("⚠️ Backup not possible due to permissions - proceeding with cleanup only")
+                logger.warning("⚠️ Backup not possible due to permissions - proceeding with cleanup only")
                 backup_success = True  # المتابعة بدون نسخ احتياطي
             else:
                 backup_success = self.backup_system_state()
 
             if not backup_success:
-                print("❌ CLEANUP ABORTED: Backup failed, preserving all data")
+                logger.error("❌ CLEANUP ABORTED: Backup failed, preserving all data")
                 if self.notification_manager.should_send_message('general'):
                     self.notification_manager.send_notifications("❌ فشل النسخ الاحتياطي - تم إلغاء التنظيف اليومي", 'general')
                 return False
@@ -77,8 +80,8 @@ class CleanupManager:
             # 🆕 تنفيذ التنظيف حتى لو فشل النسخ الاحتياطي (لكن مع إشعار)
             self._execute_cleanup()
 
-            print("✅ DAILY CLEANUP COMPLETED SUCCESSFULLY")
-            print("="*60)
+            logger.info("✅ DAILY CLEANUP COMPLETED SUCCESSFULLY")
+            logger.info("="*60)
 
             if self.notification_manager.should_send_message('general'):
                 cleanup_msg = self._format_cleanup_success_message()
@@ -87,7 +90,7 @@ class CleanupManager:
             return True
 
         except Exception as e:
-            print(f"💥 CLEANUP FAILED: Restoring original data: {e}")
+            logger.error(f"💥 CLEANUP FAILED: Restoring original data: {e}")
             
             self.group_manager.pending_signals = original_data['pending_signals']
             self.trade_manager.active_trades = original_data['active_trades']
@@ -109,10 +112,10 @@ class CleanupManager:
                 f.write("test")
             # حذف ملف الاختبار
             os.remove(test_file)
-            print("✅ Backup is possible - file creation test passed")
+            logger.debug("✅ Backup is possible - file creation test passed")
             return True
         except Exception as e:
-            print(f"❌ Backup not possible - cannot create files: {e}")
+            logger.error(f"❌ Backup not possible - cannot create files: {e}")
             return False
 
     def _execute_cleanup(self):
@@ -133,19 +136,19 @@ class CleanupManager:
         if hasattr(self.trade_manager, 'symbol_trade_count'):
             self.trade_manager.symbol_trade_count.clear()
 
-        print(f"✅ Cleanup executed:")
-        print(f"   📭 Cleared {pending_signals_count} pending signal groups")
-        print(f"   📊 Cleared {active_trades_count} active trades")
-        print(f"   📈 Cleared {current_trend_count} current trends")
-        print(f"   📋 Cleared {previous_trend_count} previous trends")
-        print("🔄 All system data has been reset for the new day")
+        logger.info(f"✅ Cleanup executed:")
+        logger.info(f"   📭 Cleared {pending_signals_count} pending signal groups")
+        logger.info(f"   📊 Cleared {active_trades_count} active trades")
+        logger.info(f"   📈 Cleared {current_trend_count} current trends")
+        logger.info(f"   📋 Cleared {previous_trend_count} previous trends")
+        logger.info("🔄 All system data has been reset for the new day")
 
     def backup_system_state(self):
         """Enhanced backup system with ULTIMATE permission handling"""
         backup_success = False
         
         try:
-            print("💾 Starting system backup...")
+            logger.info("💾 Starting system backup...")
             backup_data = {
                 "timestamp": datetime.now().isoformat(),
                 "pending_signals": self._safe_pending_signals_snapshot(),
@@ -164,14 +167,14 @@ class CleanupManager:
             backup_json = json.dumps(backup_data, indent=2, ensure_ascii=False)
             backup_size = len(backup_json.encode('utf-8'))
             
-            print(f"✅ Backup created in memory: {backup_size} bytes")
-            print("💡 Note: Backup stored in memory only due to file permission issues")
+            logger.info(f"✅ Backup created in memory: {backup_size} bytes")
+            logger.info("💡 Note: Backup stored in memory only due to file permission issues")
             
             # 🆕 يمكن إضافة حفظ في قاعدة بيانات أو خدمة سحابية هنا لاحقاً
             backup_success = True
 
         except Exception as e:
-            print(f"❌ Backup Failed: {e}")
+            logger.error(f"❌ Backup Failed: {e}")
         
         return backup_success
 

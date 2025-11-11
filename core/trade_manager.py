@@ -1,9 +1,11 @@
 # core/trade_manager.py
+import logging
 from datetime import datetime
 from typing import Dict, List
 
-class TradeManager:
+logger = logging.getLogger(__name__)
 
+class TradeManager:
     def __init__(self, config):
         self.config = config
         
@@ -57,7 +59,7 @@ class TradeManager:
         # تحديث الاتجاه الحالي
         self.current_trend[symbol] = direction
         
-        print(f"📈 تم تحديث الاتجاه: {symbol} -> {direction.upper()} (سابقاً: {old_trend})")
+        logger.debug(f"📈 تم تحديث الاتجاه: {symbol} -> {direction.upper()} (سابقاً: {old_trend})")
         
         # التحقق مما إذا كان التغيير يستحق الإبلاغ
         should_report = self._should_report_trend_change(symbol, direction, old_trend)
@@ -78,13 +80,13 @@ class TradeManager:
         """🆕 مسح الإشارات المخالفة للاتجاه الجديد وإرجاع التفاصيل"""
         try:
             if not self.group_manager:
-                print(f"⚠️ GroupManager غير متوفر لتنظيف الإشارات لـ {symbol}")
+                logger.warning(f"⚠️ GroupManager غير متوفر لتنظيف الإشارات لـ {symbol}")
                 return {}
             
             # تحديد اتجاه الإشارات التي يجب مسحها
             direction_to_remove = 'bullish' if new_trend == 'bearish' else 'bearish'
             
-            print(f"🧹 تنظيف إشارات {direction_to_remove} المخالفة للاتجاه {new_trend} لـ {symbol}")
+            logger.debug(f"🧹 تنظيف إشارات {direction_to_remove} المخالفة للاتجاه {new_trend} لـ {symbol}")
             
             # 🆕 استدعاء GroupManager لمسح الإشارات المخالفة مع الحصول على التفاصيل
             # استخدام الدالة الأساسية إذا كانت التفصيلية غير متاحة
@@ -96,14 +98,14 @@ class TradeManager:
                 cleaning_result = {'removed_count': removed_count, 'removed_signals': []}
             
             if cleaning_result and cleaning_result.get('removed_count', 0) > 0:
-                print(f"✅ تم مسح {cleaning_result['removed_count']} إشارة مخالفة لـ {symbol}")
+                logger.debug(f"✅ تم مسح {cleaning_result['removed_count']} إشارة مخالفة لـ {symbol}")
                 return cleaning_result
             else:
-                print(f"🔍 لا توجد إشارات مخالفة لمسحها لـ {symbol}")
+                logger.debug(f"🔍 لا توجد إشارات مخالفة لمسحها لـ {symbol}")
                 return {}
                 
         except Exception as e:
-            print(f"⚠️ خطأ في تنظيف الإشارات المخالفة: {e}")
+            logger.error(f"⚠️ خطأ في تنظيف الإشارات المخالفة: {e}")
             return {}
 
     def _send_detailed_trend_notification(self, symbol: str, new_trend: str, old_trend: str, cleaning_details: Dict, signal_data: Dict):
@@ -117,7 +119,7 @@ class TradeManager:
             
             if (notification_key in self._last_trend_notification and 
                 (current_time - self._last_trend_notification[notification_key]).total_seconds() < 10):
-                print(f"🔇 منع إشعار مكرر لـ {symbol} - {new_trend}")
+                logger.debug(f"🔇 منع إشعار مكرر لـ {symbol} - {new_trend}")
                 return
             
             # 🆕 الحصول على الإشارات المتبقية المتوافقة مع الاتجاه الجديد
@@ -136,7 +138,7 @@ class TradeManager:
                 )
             except AttributeError:
                 # 🆕 إذا فشلت، استخدم الدالة الأساسية
-                print("⚠️ استخدام الدالة البديلة format_simple_trend_message")
+                logger.debug("⚠️ استخدام الدالة البديلة format_simple_trend_message")
                 detailed_message = MessageFormatter.format_simple_trend_message(
                     symbol=symbol,
                     new_trend=new_trend,
@@ -151,12 +153,12 @@ class TradeManager:
                 # 🛠️ حفظ معلومات آخر إشعار
                 self._last_trend_notification[notification_key] = current_time
                 
-                print(f"📤 تم إرسال إشعار تغيير الاتجاه التفصيلي لـ {symbol}")
+                logger.debug(f"📤 تم إرسال إشعار تغيير الاتجاه التفصيلي لـ {symbol}")
             else:
-                print(f"🔕 إشعارات الاتجاه معطلة - لم يتم إرسال الإشعار لـ {symbol}")
+                logger.debug(f"🔕 إشعارات الاتجاه معطلة - لم يتم إرسال الإشعار لـ {symbol}")
                 
         except Exception as e:
-            print(f"⚠️ خطأ في إرسال إشعار تغيير الاتجاه التفصيلي: {e}")
+            logger.error(f"⚠️ خطأ في إرسال إشعار تغيير الاتجاه التفصيلي: {e}")
 
     def _get_remaining_signals(self, symbol: str, new_trend: str) -> List[Dict]:
         """🆕 الحصول على الإشارات المتبقية المتوافقة مع الاتجاه الجديد"""
@@ -191,7 +193,7 @@ class TradeManager:
             return remaining_signals
             
         except Exception as e:
-            print(f"⚠️ خطأ في جمع الإشارات المتبقية: {e}")
+            logger.error(f"⚠️ خطأ في جمع الإشارات المتبقية: {e}")
             return []
 
     def _get_group_display_name(self, group_name: str) -> str:
@@ -213,15 +215,15 @@ class TradeManager:
             self.last_reported_trend[symbol] = new_trend
             return True
             
-        # إذا كان الاتجاه الجديد مختلف عن الأخير الذي تم الإبلاغ عنه
+        # إذا كان الاتجاه الجديد مختلف عن الأخير الذي تم الإبلاع عنه
         last_reported = self.last_reported_trend.get(symbol)
         if last_reported != new_trend:
             self.last_reported_trend[symbol] = new_trend
-            print(f"🔄 تغيير حقيقي في الاتجاه: {symbol} من {last_reported} إلى {new_trend}")
+            logger.debug(f"🔄 تغيير حقيقي في الاتجاه: {symbol} من {last_reported} إلى {new_trend}")
             return True
             
         # إذا كان نفس الاتجاه، لا نبلغ
-        print(f"🔁 نفس الاتجاه - لا إشعار: {symbol} -> {new_trend}")
+        logger.debug(f"🔁 نفس الاتجاه - لا إشعار: {symbol} -> {new_trend}")
         return False
 
     def get_previous_trend(self, symbol):
@@ -234,17 +236,17 @@ class TradeManager:
             return
 
         trend = self.current_trend[symbol]
-        print(f"🔍 فحص الصفقات المخالفة لـ {symbol} - الاتجاه: {trend}")
+        logger.debug(f"🔍 فحص الصفقات المخالفة لـ {symbol} - الاتجاه: {trend}")
 
         trades_to_close = []
         for trade_id, trade in self.active_trades.items():
             if trade["symbol"] == symbol:
                 if trend == "bullish" and trade["side"] == "sell":
                     trades_to_close.append(trade_id)
-                    print(f"🔴 إغلاق صفقة بيع مخالفة للاتجاه: {trade_id}")
+                    logger.debug(f"🔴 إغلاق صفقة بيع مخالفة للاتجاه: {trade_id}")
                 elif trend == "bearish" and trade["side"] == "buy":
                     trades_to_close.append(trade_id)
-                    print(f"🔴 إغلاق صفقة شراء مخالفة للاتجاه: {trade_id}")
+                    logger.debug(f"🔴 إغلاق صفقة شراء مخالفة للاتجاه: {trade_id}")
 
         # إغلاق الصفقات المخالفة
         for trade_id in trades_to_close:
@@ -254,7 +256,7 @@ class TradeManager:
         """فتح صفقة جديدة مع إضافة نوع الاستراتيجية والنمط"""
         # التحقق من الحد الأقصى للصفقات الإجمالي
         if len(self.active_trades) >= self.config['MAX_OPEN_TRADES']:
-            print(f"❌ تجاوز الحد الأقصى للصفقات المفتوحة: {self.config['MAX_OPEN_TRADES']}")
+            logger.warning(f"❌ تجاوز الحد الأقصى للصفقات المفتوحة: {self.config['MAX_OPEN_TRADES']}")
             return False
 
         # 🆕 تهيئة عداد الرمز إذا لم يكن موجوداً
@@ -263,7 +265,7 @@ class TradeManager:
 
         # التحقق من الحد الأقصى للصفقات لكل رمز
         if self.symbol_trade_count[symbol] >= self.config['MAX_TRADES_PER_SYMBOL']:
-            print(f"❌ تجاوز الحد الأقصى لصفقات الرمز {symbol}: {self.config['MAX_TRADES_PER_SYMBOL']}")
+            logger.warning(f"❌ تجاوز الحد الأقصى لصفقات الرمز {symbol}: {self.config['MAX_TRADES_PER_SYMBOL']}")
             return False
 
         # 🆕 إصلاح إنشاء معرف الصفقة
@@ -283,9 +285,9 @@ class TradeManager:
         self.symbol_trade_count[symbol] += 1
         self.metrics["trades_opened"] += 1
         
-        print(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type} | الاتجاه: {direction.upper()}")
-        print(f"📊 صفقات {symbol}: {self.symbol_trade_count[symbol]}/{self.config['MAX_TRADES_PER_SYMBOL']}")
-        print(f"📊 الصفقات الإجمالية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
+        logger.debug(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type} | الاتجاه: {direction.upper()}")
+        logger.debug(f"📊 صفقات {symbol}: {self.symbol_trade_count[symbol]}/{self.config['MAX_TRADES_PER_SYMBOL']}")
+        logger.debug(f"📊 الصفقات الإجمالية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
         
         return True
 
@@ -305,7 +307,7 @@ class TradeManager:
             mode_key = self.active_trades[trade_id].get("mode_key", "TRADING_MODE")
             strategy_type = self.active_trades[trade_id].get("strategy_type", "GROUP1")
             
-            print(f"✅ تم إغلاق الصفقة: {trade_id} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
+            logger.debug(f"✅ تم إغلاق الصفقة: {trade_id} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
             
             # 🆕 تحديث العداد بشكل آمن
             if symbol in self.symbol_trade_count and self.symbol_trade_count[symbol] > 0:
@@ -317,26 +319,26 @@ class TradeManager:
             del self.active_trades[trade_id]
             self.metrics["trades_closed"] += 1
             
-            print(f"📊 صفقات {symbol} المتبقية: {self.symbol_trade_count.get(symbol, 0)}/{self.config['MAX_TRADES_PER_SYMBOL']}")
-            print(f"📊 الصفقات الإجمالية المتبقية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
+            logger.debug(f"📊 صفقات {symbol} المتبقية: {self.symbol_trade_count.get(symbol, 0)}/{self.config['MAX_TRADES_PER_SYMBOL']}")
+            logger.debug(f"📊 الصفقات الإجمالية المتبقية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
             return True
         else:
-            print(f"⚠️ الصفقة غير موجودة: {trade_id}")
+            logger.warning(f"⚠️ الصفقة غير موجودة: {trade_id}")
             return False
 
     def handle_exit_signal(self, symbol, signal_type):
         """معالجة إشارات الخروج"""
-        print(f"📤 معالجة إشارة خروج لـ {symbol}: {signal_type}")
+        logger.debug(f"📤 معالجة إشارة خروج لـ {symbol}: {signal_type}")
         trades_closed = 0
         
         for trade_id, trade in list(self.active_trades.items()):
             if trade["symbol"] == symbol:
                 mode_key = trade.get("mode_key", "TRADING_MODE")
-                print(f"📤 إشارة خروج -> إغلاق الصفقة: {trade_id} | النمط: {mode_key}")
+                logger.debug(f"📤 إشارة خروج -> إغلاق الصفقة: {trade_id} | النمط: {mode_key}")
                 if self.close_trade(trade_id):
                     trades_closed += 1
         
-        print(f"✅ تم إغلاق {trades_closed} صفقة لـ {symbol}")
+        logger.debug(f"✅ تم إغلاق {trades_closed} صفقة لـ {symbol}")
 
     def _get_current_timestamp(self):
         """الحصول على الطابع الزمني الحالي"""

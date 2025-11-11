@@ -1,8 +1,8 @@
 # core/group_manager.py
+import logging
 from datetime import datetime, timedelta
 import hashlib
-import logging
-from typing import Dict, List, Optional, Tuple  # 🆕 إضافة استيرادات typing
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class GroupManager:
         self.error_log = []
         self.mode_performance = {}
         
-        print("🎯 نظام المجموعات المُحسّن جاهز - تقارير تفصيلية عن التنظيف")
+        logger.info("🎯 نظام المجموعات المُحسّن جاهز - تقارير تفصيلية عن التنظيف")
 
     def clean_contrarian_signals_detailed(self, symbol: str, direction_to_remove: str) -> Dict:
         """🧹 مسح الإشارات المخالفة للاتجاه الحالي مع تفاصيل كاملة"""
@@ -67,7 +67,7 @@ class GroupManager:
             # تحديث وقت التحديث
             self.pending_signals[group_key]["updated_at"] = datetime.now()
             
-            print(f"🧹 تم مسح {total_removed} إشارة {direction_to_remove} مخالفة لـ {symbol}")
+            logger.debug(f"🧹 تم مسح {total_removed} إشارة {direction_to_remove} مخالفة لـ {symbol}")
             
             # 🆕 إرجاع تقرير تفصيلي
             return {
@@ -80,7 +80,6 @@ class GroupManager:
             
         except Exception as e:
             error_msg = f"⚠️ خطأ في مسح الإشارات المخالفة: {e}"
-            print(error_msg)
             logger.error(error_msg)
             return {'removed_count': 0, 'removed_signals': []}
 
@@ -144,7 +143,7 @@ class GroupManager:
             return stats
             
         except Exception as e:
-            print(f"⚠️ خطأ في إحصائيات الإشارات: {e}")
+            logger.error(f"⚠️ خطأ في إحصائيات الإشارات: {e}")
             return {'total_signals': 0, 'groups': {}}
 
     def route_signal(self, symbol: str, signal_data: Dict, classification: str) -> List[Dict]:
@@ -178,7 +177,6 @@ class GroupManager:
 
         except Exception as e:
             error_msg = f"💥 خطأ في توجيه الإشارة: {symbol} | {str(e)}"
-            print(error_msg)
             logger.error(error_msg)
             self.error_log.append(error_msg)
             return []
@@ -186,16 +184,16 @@ class GroupManager:
     def _validate_input(self, symbol: str, signal_data: Dict, classification: str) -> bool:
         """✅ التحقق من صحة بيانات الإدخال"""
         if not symbol or symbol == 'UNKNOWN':
-            print("❌ رمز غير صالح")
+            logger.error("❌ رمز غير صالح")
             return False
         
         if not signal_data or 'signal_type' not in signal_data:
-            print("❌ بيانات الإشارة غير صالحة")
+            logger.error("❌ بيانات الإشارة غير صالحة")
             return False
         
         valid_classifications = ['entry_bullish', 'entry_bearish', 'entry_bullish1', 'entry_bearish1', 'group3']
         if classification not in valid_classifications:
-            print(f"❌ تصنيف غير معروف: {classification}")
+            logger.error(f"❌ تصنيف غير معروف: {classification}")
             return False
         
         return True
@@ -224,7 +222,7 @@ class GroupManager:
                 cleaned_count += (original_count - len(self.pending_signals[group_key][group_name]))
         
         if cleaned_count > 0:
-            print(f"🧹 تم تنظيف {cleaned_count} إشارة قديمة لـ {symbol} (العمر: {self.signal_max_age.total_seconds()/60} دقيقة)")
+            logger.debug(f"🧹 تم تنظيف {cleaned_count} إشارة قديمة لـ {symbol} (العمر: {self.signal_max_age.total_seconds()/60} دقيقة)")
 
     def _determine_group_and_direction(self, classification: str, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
         """🎯 تحديد المجموعة والاتجاه بدقة مع GROUP3 المنفصل - تحسين الرسائل"""
@@ -241,7 +239,7 @@ class GroupManager:
         result = classification_map.get(classification)
         
         if not result:
-            print(f"❌ تعيين غير معروف للتصنيف: {classification}")
+            logger.error(f"❌ تعيين غير معروف للتصنيف: {classification}")
             return None, None
         
         # 📝 معالجة خاصة لـ GROUP3
@@ -252,12 +250,12 @@ class GroupManager:
                 signal_type = signal_data['signal_type']
                 # فقط طباعة رسالة مبسطة للإشارات غير GROUP3
                 if not any(keyword in signal_type.lower() for keyword in ['moneyflow', 'catcher', 'hyperwave']):
-                    print(f"❌ إشارة GROUP3 غير معروفة: {signal_type}")
+                    logger.error(f"❌ إشارة GROUP3 غير معروفة: {signal_type}")
                 return None, None
         else:
             group_type, direction = result
         
-        print(f"🎯 التصنيف: {classification} → المجموعة: {group_type} | الاتجاه: {direction}")
+        logger.debug(f"🎯 التصنيف: {classification} → المجموعة: {group_type} | الاتجاه: {direction}")
         return group_type, direction
 
     def _determine_group3_direction_strict(self, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
@@ -277,10 +275,10 @@ class GroupManager:
         
         # ✅ التطابق التام 100% فقط مع القوائم المنفصلة
         if group3_signal_clean in group3_bullish_signals:
-            print(f"✅ تم التعرف على إشارة GROUP3 صاعدة (تطابق تام): {signal_data['signal_type']}")
+            logger.debug(f"✅ تم التعرف على إشارة GROUP3 صاعدة (تطابق تام): {signal_data['signal_type']}")
             return 'group3_bullish', 'buy'
         elif group3_signal_clean in group3_bearish_signals:
-            print(f"✅ تم التعرف على إشارة GROUP3 هابطة (تطابق تام): {signal_data['signal_type']}")
+            logger.debug(f"✅ تم التعرف على إشارة GROUP3 هابطة (تطابق تام): {signal_data['signal_type']}")
             return 'group3_bearish', 'sell'
         else:
             return None, None
@@ -290,7 +288,7 @@ class GroupManager:
         current_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
         
         if current_trend == 'UNKNOWN':
-            print(f"⏸️  تجاهل الإشارة - اتجاه غير معروف: {symbol}")
+            logger.debug(f"⏸️  تجاهل الإشارة - اتجاه غير معروف: {symbol}")
             return False
         
         is_aligned = (
@@ -299,7 +297,7 @@ class GroupManager:
         )
         
         if not is_aligned:
-            print(f"🚫 الإشارة مخالفة للاتجاه: {direction.upper()} vs {current_trend.upper()}")
+            logger.debug(f"🚫 الإشارة مخالفة للاتجاه: {direction.upper()} vs {current_trend.upper()}")
         
         return is_aligned
 
@@ -317,7 +315,7 @@ class GroupManager:
             if group_key in self.pending_signals:
                 for signal in self.pending_signals[group_key][gt]:
                     if signal.get('hash') == signal_hash:
-                        print(f"🔁 إشارة مكررة - تم تجاهلها: {signal_data['signal_type']}")
+                        logger.debug(f"🔁 إشارة مكررة - تم تجاهلها: {signal_data['signal_type']}")
                         return True
         
         return False
@@ -349,13 +347,13 @@ class GroupManager:
         max_signals = 50
         if len(self.pending_signals[group_key][group_type]) >= max_signals:
             removed_signal = self.pending_signals[group_key][group_type].pop(0)
-            print(f"🗑️  تم إزالة إشارة قديمة: {removed_signal['signal_type']}")
+            logger.debug(f"🗑️  تم إزالة إشارة قديمة: {removed_signal['signal_type']}")
         
         # إضافة الإشارة الجديدة
         self.pending_signals[group_key][group_type].append(signal_info)
         self.pending_signals[group_key]["updated_at"] = datetime.now()
         
-        print(f"📥 إشارة مضافة: {signal_data['signal_type']} → {group_type}")
+        logger.debug(f"📥 إشارة مضافة: {signal_data['signal_type']} → {group_type}")
 
     def _evaluate_entry_conditions(self, symbol: str, direction: str) -> List[Dict]:
         """📊 تقييم شروط الدخول للصفقات"""
@@ -368,11 +366,11 @@ class GroupManager:
             # 📈 حساب عدد الإشارات لكل مجموعة
             signal_counts = self._count_signals_by_direction(group_key, direction)
             
-            print(f"📊 إحصائيات {symbol} [{direction.upper()}]: G1={signal_counts['g1']}, G2={signal_counts['g2']}, G3={signal_counts['g3']}")
+            logger.debug(f"📊 إحصائيات {symbol} [{direction.upper()}]: G1={signal_counts['g1']}, G2={signal_counts['g2']}, G3={signal_counts['g3']}")
             
             # ✅ الشرط الأساسي الإلزامي: يجب توفر الحد الأدنى من GROUP1
             if signal_counts['g1'] < self.config["REQUIRED_CONFIRMATIONS_GROUP1"]:
-                print(f"❌ شروط المجموعة الأولى غير محققة: {signal_counts['g1']}/{self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
+                logger.debug(f"❌ شروط المجموعة الأولى غير محققة: {signal_counts['g1']}/{self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
                 return []  # 🚨 إرجاع فوري - لا مزيد من المعالجة
             
             # 🎯 تقييم الأنماط المفعلة فقط
@@ -387,15 +385,14 @@ class GroupManager:
             # 🧹 إعادة تعيين الإشارات المستخدمة
             if trade_results:
                 self._reset_used_signals(symbol, direction, trade_results)
-                print(f"✅ تم فتح {len(trade_results)} صفقة لـ {symbol}")
+                logger.debug(f"✅ تم فتح {len(trade_results)} صفقة لـ {symbol}")
             else:
-                print(f"⏹️  لم يتم فتح أي صفقة لـ {symbol}")
+                logger.debug(f"⏹️  لم يتم فتح أي صفقة لـ {symbol}")
             
             return trade_results
             
         except Exception as e:
             error_msg = f"💥 خطأ في تقييم شروط الدخول: {symbol} | {str(e)}"
-            print(error_msg)
             logger.error(error_msg)
             return []
 
@@ -425,7 +422,7 @@ class GroupManager:
         if self.config.get('TRADING_MODE2_ENABLED', False):
             active_modes.append('TRADING_MODE2')
         
-        print(f"🎯 الأنماط المفعلة: {active_modes}")
+        logger.debug(f"🎯 الأنماط المفعلة: {active_modes}")
         return active_modes
 
     def _evaluate_single_mode(self, mode_key: str, symbol: str, direction: str, signal_counts: Dict) -> Optional[Dict]:
@@ -437,13 +434,13 @@ class GroupManager:
             
             # 🎯 الحصول على إعدادات النمط
             trading_mode = self.config[mode_key]
-            print(f"🔍 فحص النمط {mode_key}: {trading_mode}")
+            logger.debug(f"🔍 فحص النمط {mode_key}: {trading_mode}")
             
             # ✅ التحقق من شروط الدخول حسب الاستراتيجية
             conditions_met, required_groups = self._check_strategy_conditions(trading_mode, signal_counts)
             
             if conditions_met:
-                print(f"🎯 شروط الدخول متحققة لـ {symbol} بالنمط {mode_key}")
+                logger.debug(f"🎯 شروط الدخول متحققة لـ {symbol} بالنمط {mode_key}")
                 
                 # 💼 فتح الصفقة
                 if self._open_trade(symbol, direction, trading_mode, mode_key):
@@ -461,7 +458,6 @@ class GroupManager:
             
         except Exception as e:
             error_msg = f"💥 خطأ في تقييم النمط {mode_key}: {str(e)}"
-            print(error_msg)
             logger.error(error_msg)
             return None
 
@@ -470,13 +466,13 @@ class GroupManager:
         # التحقق من الحدود العامة
         current_count = self.trade_manager.get_active_trades_count(symbol)
         if current_count >= self.config['MAX_TRADES_PER_SYMBOL']:
-            print(f"⏹️  وصل الرمز {symbol} للحد الأقصى: {current_count}")
+            logger.debug(f"⏹️  وصل الرمز {symbol} للحد الأقصى: {current_count}")
             return False
         
         # التحقق من الحدود الإجمالية
         total_trades = self.trade_manager.get_active_trades_count()
         if total_trades >= self.config['MAX_OPEN_TRADES']:
-            print(f"⏹️  وصل النظام للحد الأقصى الإجمالي: {total_trades}")
+            logger.debug(f"⏹️  وصل النظام للحد الأقصى الإجمالي: {total_trades}")
             return False
         
         # التحقق من حدود النمط
@@ -490,7 +486,7 @@ class GroupManager:
         mode_limit = mode_limits.get(mode_key, 2)
         
         if current_mode_trades >= mode_limit:
-            print(f"⏹️  النمط {mode_key} وصل الحد: {current_mode_trades}/{mode_limit}")
+            logger.debug(f"⏹️  النمط {mode_key} وصل الحد: {current_mode_trades}/{mode_limit}")
             return False
         
         return True
@@ -523,7 +519,7 @@ class GroupManager:
             return group2_ok and group3_ok, required_groups
             
         else:
-            print(f"⚠️ استراتيجية غير معروفة: {trading_mode}")
+            logger.warning(f"⚠️ استراتيجية غير معروفة: {trading_mode}")
             return False, required_groups
 
     def _collect_trade_signals(self, symbol: str, direction: str, required_groups: List[str]) -> Dict:
@@ -558,10 +554,10 @@ class GroupManager:
     def _open_trade(self, symbol: str, direction: str, strategy_type: str, mode_key: str) -> bool:
         """💼 فتح صفقة جديدة"""
         try:
-            print(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
+            logger.debug(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
             return self.trade_manager.open_trade(symbol, direction, strategy_type, mode_key)
         except Exception as e:
-            print(f"❌ فشل فتح الصفقة: {e}")
+            logger.error(f"❌ فشل فتح الصفقة: {e}")
             return False
 
     def _count_trades_by_mode(self, symbol: str, mode_key: str) -> int:
@@ -587,7 +583,7 @@ class GroupManager:
                     signals = trade.get(group, [])
                     used_signals.update(signals)
             
-            print(f"🎯 الإشارات المستخدمة التي سيتم حذفها: {used_signals}")
+            logger.debug(f"🎯 الإشارات المستخدمة التي سيتم حذفها: {used_signals}")
             
             if not used_signals:
                 return
@@ -606,10 +602,10 @@ class GroupManager:
                 removed_count = original_count - len(self.pending_signals[group_key][group_type])
                 removed_total += removed_count
             
-            print(f"✅ تم حذف {removed_total} إشارة مستخدمة")
+            logger.debug(f"✅ تم حذف {removed_total} إشارة مستخدمة")
             
         except Exception as e:
-            print(f"⚠️ خطأ في إعادة تعيين الإشارات: {e}")
+            logger.error(f"⚠️ خطأ في إعادة تعيين الإشارات: {e}")
 
     def get_group_stats(self, symbol: str) -> Optional[Dict]:
         """📈 الحصول على إحصائيات المجموعات"""
@@ -637,7 +633,7 @@ class GroupManager:
                 'updated_at': groups['updated_at']
             }
         except Exception as e:
-            print(f"⚠️ خطأ في إحصائيات المجموعات: {e}")
+            logger.error(f"⚠️ خطأ في إحصائيات المجموعات: {e}")
             return None
 
     def cleanup_all_groups(self) -> bool:
@@ -645,8 +641,8 @@ class GroupManager:
         try:
             count_before = len(self.pending_signals)
             self.pending_signals.clear()
-            print(f"✅ تم تنظيف جميع المجموعات: {count_before} → 0")
+            logger.debug(f"✅ تم تنظيف جميع المجموعات: {count_before} → 0")
             return True
         except Exception as e:
-            print(f"❌ خطأ في تنظيف المجموعات: {e}")
+            logger.error(f"❌ خطأ في تنظيف المجموعات: {e}")
             return False

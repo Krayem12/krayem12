@@ -2,6 +2,7 @@
 import schedule
 import threading
 import time
+import logging
 from flask import Flask
 from datetime import datetime
 
@@ -13,19 +14,21 @@ from core.webhook_handler import WebhookHandler
 from notifications.notification_manager import NotificationManager
 from maintenance.cleanup_manager import CleanupManager
 
+logger = logging.getLogger(__name__)
+
 class TradingSystem:
     """Trading System with DETAILED TREND CHANGE NOTIFICATIONS"""
 
     def __init__(self):
-        print("🚀 Starting Trading System with DETAILED TREND CHANGE NOTIFICATIONS...")
+        logger.info("🚀 Starting Trading System with COMPLETE METHOD IMPLEMENTATION + GROUP3...")
         try:
             self.setup_managers()
             self.setup_flask()
             self.setup_scheduler()
             self.display_system_info()
-            print("✅ System initialized successfully with detailed trend notifications")
+            logger.info("✅ System initialized successfully with detailed trend notifications")
         except Exception as e:
-            print(f"❌ System initialization failed: {e}")
+            logger.error(f"❌ System initialization failed: {e}")
             raise
 
     def setup_managers(self):
@@ -40,7 +43,7 @@ class TradingSystem:
         if not self.config or not self.signals:
             raise ValueError("❌ فشل تحميل الإعدادات أو الإشارات")
         
-        print("✅ تم تحميل الإعدادات بنجاح، جاري تهيئة المديرين...")
+        logger.info("✅ تم تحميل الإعدادات بنجاح، جاري تهيئة المديرين...")
 
         # Initialize core managers
         self.signal_processor = SignalProcessor(self.config, self.signals, self.keywords)
@@ -99,23 +102,23 @@ class TradingSystem:
 
     def display_loaded_signals(self):
         """Display loaded signals information"""
-        print("\n📊 Loaded Signals Summary:")
+        logger.info("\n📊 Loaded Signals Summary:")
         total_signals = 0
         for category, signals in self.signals.items():
-            print(f"   📁 {category}: {len(signals)} signals")
+            logger.info(f"   📁 {category}: {len(signals)} signals")
             total_signals += len(signals)
 
-        print(f"\n📈 Total signals loaded: {total_signals}")
+        logger.info(f"\n📈 Total signals loaded: {total_signals}")
         
         # 🎯 NEW: Display strategy information
-        print(f"\n🎯 Active Trading Strategy: {self.config['TRADING_MODE']}")
-        print(f"   • Group1 Trend Mode: {self.config['GROUP1_TREND_MODE']}")
-        print(f"   • Group2 Enabled: {'✅ YES' if self.config['GROUP2_ENABLED'] else '❌ NO'}")
-        print(f"   • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
+        logger.info(f"\n🎯 Active Trading Strategy: {self.config['TRADING_MODE']}")
+        logger.info(f"   • Group1 Trend Mode: {self.config['GROUP1_TREND_MODE']}")
+        logger.info(f"   • Group2 Enabled: {'✅ YES' if self.config['GROUP2_ENABLED'] else '❌ NO'}")
+        logger.info(f"   • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
         
         # 🆕 عرض معلومات الإشعارات التفصيلية
-        print(f"\n🧹 Detailed Trend Notifications: {'✅ ACTIVE' if self.trade_manager.group_manager else '❌ INACTIVE'}")
-        print(f"📊 Signal Statistics Tracking: {'✅ ENABLED' if self.trade_manager.notification_manager else '❌ DISABLED'}")
+        logger.info(f"\n🧹 Detailed Trend Notifications: {'✅ ACTIVE' if self.trade_manager.group_manager else '❌ INACTIVE'}")
+        logger.info(f"📊 Signal Statistics Tracking: {'✅ ENABLED' if self.trade_manager.notification_manager else '❌ DISABLED'}")
 
     def get_system_status(self):
         """Get system status"""

@@ -8,6 +8,12 @@ from .validators import ConfigValidator
 # تحميل متغيرات البيئة من ملف .env
 load_dotenv()
 
+# 🛠️ الإصلاح: تهيئة النظام الأساسي للتسجيل أولاً
+logging.basicConfig(
+    level=logging.ERROR,  # المستوى الافتراضي حتى يتم تحميل الإعدادات
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
 logger = logging.getLogger(__name__)
 
 class ConfigManager:
@@ -57,8 +63,8 @@ class ConfigManager:
             'GROUP3_ENABLED': os.getenv('GROUP3_ENABLED', 'true').lower() == 'true',
             'REQUIRED_CONFIRMATIONS_GROUP3': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP3', 1),
 
-            # 🆕 إعداد واحد لتحكم بفترة التنظيف
-            'SIGNAL_CLEANUP_INTERVAL_MINUTES': self._safe_int_convert('SIGNAL_CLEANUP_INTERVAL_MINUTES', 5),
+            # 🆕 إزالة: إعدادات التنظيف المضللة
+            # 'SIGNAL_CLEANUP_INTERVAL_MINUTES': self._safe_int_convert('SIGNAL_CLEANUP_INTERVAL_MINUTES', 5),
 
             # Trend Settings
             'RESPECT_TREND_FOR_REGULAR_TRADES': os.getenv('RESPECT_TREND_FOR_REGULAR_TRADES', 'true').lower() == 'true',
@@ -81,7 +87,8 @@ class ConfigManager:
         self.port = self._robust_port_handling()
         self.config['PORT'] = self.port
         
-        logger.setLevel(getattr(logging, self.config['LOG_LEVEL'], logging.INFO))
+        # 🛠️ الإصلاح: تطبيق مستوى التسجيل على جميع اللوجرات
+        self._apply_logging_config()
 
         # 🎯 تحميل الإشارات مع قوائم GROUP3 المنفصلة
         self.signals = {
@@ -101,26 +108,61 @@ class ConfigManager:
         self.setup_keywords()
         self.validate_configuration()
 
+    def _apply_logging_config(self):
+        """🛠️ تطبيق إعدادات التسجيل على جميع اللوجرات"""
+        try:
+            log_level = self.config['LOG_LEVEL']
+            debug_mode = self.config['DEBUG']
+            
+            # تحديد مستوى التسجيل الفعلي
+            if log_level == 'ERROR':
+                level = logging.ERROR
+            elif log_level == 'WARNING':
+                level = logging.WARNING
+            elif log_level == 'INFO':
+                level = logging.INFO
+            elif log_level == 'DEBUG':
+                level = logging.DEBUG
+            else:
+                level = logging.INFO  # افتراضي
+            
+            # 🛠️ تطبيق على جميع اللوجرات
+            logging.getLogger().setLevel(level)
+            
+            # إذا كان DEBUG=false، نخفي الرسائل التفصيلية
+            if not debug_mode:
+                # إخفاء رسائل التصحيح التفصيلية
+                logging.getLogger('werkzeug').setLevel(logging.WARNING)
+                logging.getLogger('schedule').setLevel(logging.WARNING)
+                logging.getLogger('urllib3').setLevel(logging.WARNING)
+            
+            logger.info(f"✅ تم تطبيق إعدادات التسجيل: LOG_LEVEL={log_level}, DEBUG={debug_mode}")
+            
+        except Exception as e:
+            logger.error(f"⚠️ خطأ في تطبيق إعدادات التسجيل: {e}")
+            # القيم الافتراضية في حالة الخطأ
+            logging.getLogger().setLevel(logging.ERROR)
+
     def _robust_port_handling(self):
         """ROBUST port handling - works even with empty or invalid PORT"""
         try:
             port_value = os.getenv('PORT', '').strip()
             
             if not port_value:
-                print("🔧 PORT is empty or not set, using default: 10000")
+                logger.info("🔧 PORT is empty or not set, using default: 10000")
                 return 10000
             
             port_int = int(port_value)
             
             if 1 <= port_int <= 65535:
-                print(f"✅ PORT successfully loaded: {port_int}")
+                logger.info(f"✅ PORT successfully loaded: {port_int}")
                 return port_int
             else:
-                print(f"⚠️ PORT {port_int} is out of range (1-65535), using default: 10000")
+                logger.warning(f"⚠️ PORT {port_int} is out of range (1-65535), using default: 10000")
                 return 10000
                 
         except (ValueError, TypeError) as e:
-            print(f"⚠️ Invalid PORT value '{os.getenv('PORT')}', using default 10000: {e}")
+            logger.error(f"⚠️ Invalid PORT value '{os.getenv('PORT')}', using default 10000: {e}")
             return 10000
 
     def _safe_int_convert(self, env_key, default):
@@ -136,7 +178,7 @@ class ConfigManager:
 
             return int(cleaned_value)
         except (ValueError, TypeError) as e:
-            print(f"⚠️ Invalid {env_key} value '{os.getenv(env_key)}', using default {default}: {e}")
+            logger.error(f"⚠️ Invalid {env_key} value '{os.getenv(env_key)}', using default {default}: {e}")
             return default
 
     def _load_signal_list(self, env_key, default_signals=""):
@@ -145,13 +187,13 @@ class ConfigManager:
             signal_str = os.getenv(env_key, default_signals)
             if signal_str:
                 signals = [s.strip() for s in signal_str.split(',') if s.strip()]
-                print(f"   ✅ Loaded {len(signals)} signals from {env_key}")
+                logger.info(f"   ✅ Loaded {len(signals)} signals from {env_key}")
                 return signals
             else:
-                print(f"   ⚠️ No signals found for {env_key}, using defaults")
+                logger.warning(f"   ⚠️ No signals found for {env_key}, using defaults")
                 return [s.strip() for s in default_signals.split(',') if s.strip()]
         except Exception as e:
-            print(f"   ❌ Error loading {env_key}: {e}, using defaults")
+            logger.error(f"   ❌ Error loading {env_key}: {e}, using defaults")
             return [s.strip() for s in default_signals.split(',') if s.strip()]
 
     def setup_keywords(self):
@@ -173,64 +215,63 @@ class ConfigManager:
             'group3': [kw.strip() for kw in group3_kw.split(',') if kw.strip()]
         }
         
-        print("🚨 ملاحظة: نظام الكلمات المفتاحية غير مفعل - التطابق التام فقط")
+        logger.info("🚨 ملاحظة: نظام الكلمات المفتاحية غير مفعل - التطابق التام فقط")
 
     def validate_configuration(self):
         """Validate system configuration"""
-        print("\n🔍 Validating configuration...")
+        logger.info("\n🔍 Validating configuration...")
         
         errors, warnings = ConfigValidator.validate_config(self.config)
         
         if errors or warnings:
             validation_report = ConfigValidator.format_validation_report(errors, warnings)
-            print(f"📋 Configuration Validation Report:\n{validation_report}")
+            logger.info(f"📋 Configuration Validation Report:\n{validation_report}")
             
             if errors:
-                print("❌ Critical configuration errors detected")
+                logger.error("❌ Critical configuration errors detected")
                 raise ValueError("Critical configuration errors detected")
             else:
-                print("⚠️ Configuration has warnings but will continue...")
+                logger.warning("⚠️ Configuration has warnings but will continue...")
         else:
-            print("✅ All configuration validations passed")
+            logger.info("✅ All configuration validations passed")
 
     def display_config(self):
         """Display loaded configuration for verification"""
-        print("\n🔧 LOADED CONFIGURATION:")
-        print("   📱 Telegram:", "✅ ENABLED" if self.config['TELEGRAM_ENABLED'] else "❌ DISABLED")
-        print("   🌐 External Server:", "✅ ENABLED" if self.config['EXTERNAL_SERVER_ENABLED'] else "❌ DISABLED")
-        print("   🧹 Daily Cleanup:", "✅ ENABLED" if self.config['DAILY_CLEANUP_ENABLED'] else "❌ DISABLED")
+        logger.info("\n🔧 LOADED CONFIGURATION:")
+        logger.info("   📱 Telegram: " + ("✅ ENABLED" if self.config['TELEGRAM_ENABLED'] else "❌ DISABLED"))
+        logger.info("   🌐 External Server: " + ("✅ ENABLED" if self.config['EXTERNAL_SERVER_ENABLED'] else "❌ DISABLED"))
+        logger.info("   🧹 Daily Cleanup: " + ("✅ ENABLED" if self.config['DAILY_CLEANUP_ENABLED'] else "❌ DISABLED"))
         if self.config['DAILY_CLEANUP_ENABLED']:
-            print(f"   🕐 Cleanup Time: {self.config['DAILY_CLEANUP_TIME']}")
+            logger.info(f"   🕐 Cleanup Time: {self.config['DAILY_CLEANUP_TIME']}")
         
         # 🎯 MULTI-MODE: Display Multi-Mode Strategy Settings
-        print("   🎯 Multi-Mode Trading Strategy:")
-        print(f"      • Mode: {self.config['TRADING_MODE']}")
-        print(f"      • Mode1: {self.config['TRADING_MODE1']} ({'✅ ENABLED' if self.config['TRADING_MODE1_ENABLED'] else '❌ DISABLED'})")
-        print(f"      • Mode2: {self.config['TRADING_MODE2']} ({'✅ ENABLED' if self.config['TRADING_MODE2_ENABLED'] else '❌ DISABLED'})")
+        logger.info("   🎯 Multi-Mode Trading Strategy:")
+        logger.info(f"      • Mode: {self.config['TRADING_MODE']}")
+        logger.info(f"      • Mode1: {self.config['TRADING_MODE1']} ({'✅ ENABLED' if self.config['TRADING_MODE1_ENABLED'] else '❌ DISABLED'})")
+        logger.info(f"      • Mode2: {self.config['TRADING_MODE2']} ({'✅ ENABLED' if self.config['TRADING_MODE2_ENABLED'] else '❌ DISABLED'})")
         
-        print(f"      • Group1 Trend Mode: {self.config['GROUP1_TREND_MODE']}")
-        print(f"      • Required Group1: {self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
-        print(f"      • Group2 Enabled: {'✅ YES' if self.config['GROUP2_ENABLED'] else '❌ NO'}")
+        logger.info(f"      • Group1 Trend Mode: {self.config['GROUP1_TREND_MODE']}")
+        logger.info(f"      • Required Group1: {self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
+        logger.info(f"      • Group2 Enabled: {'✅ YES' if self.config['GROUP2_ENABLED'] else '❌ NO'}")
         if self.config['GROUP2_ENABLED']:
-            print(f"      • Required Group2: {self.config['REQUIRED_CONFIRMATIONS_GROUP2']}")
-        print(f"      • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
+            logger.info(f"      • Required Group2: {self.config['REQUIRED_CONFIRMATIONS_GROUP2']}")
+        logger.info(f"      • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
         if self.config['GROUP3_ENABLED']:
-            print(f"      • Required Group3: {self.config['REQUIRED_CONFIRMATIONS_GROUP3']}")
+            logger.info(f"      • Required Group3: {self.config['REQUIRED_CONFIRMATIONS_GROUP3']}")
         
-        # 🆕 عرض إعدادات التنظيف الموحدة
-        print("   ⚙️ Cleanup Settings:")
-        cleanup_interval = self.config['SIGNAL_CLEANUP_INTERVAL_MINUTES']
-        print(f"      • Cleanup Interval: {cleanup_interval} minutes")
-        print(f"      • Signal Max Age: {cleanup_interval * 3} minutes (تلقائي)")
+        # 🆕 إزالة: إعدادات التنظيف المضللة
+        # logger.info("   ⚙️ Cleanup Settings:")
+        # logger.info(f"      • Cleanup Interval: {cleanup_interval} minutes")
+        # logger.info(f"      • Signal Max Age: {cleanup_interval * 3} minutes (تلقائي)")
         
         # 🆕 عرض إشارات GROUP3 المنفصلة
         if self.config['GROUP3_ENABLED']:
-            print("   🟢 Group3 Signals:")
-            print(f"      • Bullish: {len(self.signals['group3_bullish'])} signals")
-            print(f"      • Bearish: {len(self.signals['group3_bearish'])} signals")
+            logger.info("   🟢 Group3 Signals:")
+            logger.info(f"      • Bullish: {len(self.signals['group3_bullish'])} signals")
+            logger.info(f"      • Bearish: {len(self.signals['group3_bearish'])} signals")
         
-        print("   📊 Message Controls:")
-        print("      • Trend Messages:", "✅ ON" if self.config['SEND_TREND_MESSAGES'] else "❌ OFF")
-        print("      • Entry Messages:", "✅ ON" if self.config['SEND_ENTRY_MESSAGES'] else "❌ OFF")
-        print("      • Exit Messages:", "✅ ON" if self.config['SEND_EXIT_MESSAGES'] else "❌ OFF")
-        print(f"   🌐 Server Port: {self.port}")
+        logger.info("   📊 Message Controls:")
+        logger.info("      • Trend Messages: " + ("✅ ON" if self.config['SEND_TREND_MESSAGES'] else "❌ OFF"))
+        logger.info("      • Entry Messages: " + ("✅ ON" if self.config['SEND_ENTRY_MESSAGES'] else "❌ OFF"))
+        logger.info("      • Exit Messages: " + ("✅ ON" if self.config['SEND_EXIT_MESSAGES'] else "❌ OFF"))
+        logger.info(f"   🌐 Server Port: {self.port}")

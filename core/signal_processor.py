@@ -1,7 +1,10 @@
 # core/signal_processor.py
 import re
 import hashlib
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class SignalProcessor:
     """Process and classify trading signals with 100% STRICT EXACT MATCH only"""
@@ -12,7 +15,7 @@ class SignalProcessor:
         self.keywords = keywords  # 🚨 نحتفظ بها ولكن لا نستخدمها
         self.signal_index = {}
         self.setup_signal_index()
-        print("🎯 نظام التصنيف الصارم مفعل - التطابق التام 100% فقط")
+        logger.info("🎯 نظام التصنيف الصارم مفعل - التطابق التام 100% فقط")
 
     def setup_signal_index(self):
         """Optimized signal lookup index for better performance"""
@@ -20,8 +23,7 @@ class SignalProcessor:
             for signal in signal_list:
                 normalized = signal.lower().strip()
                 self.signal_index[normalized] = category
-                # تسجيل جميع الإشارات المعروفة
-                print(f"   📝 مسجل: '{signal}' → {category}")
+                logger.debug(f"   📝 مسجل: '{signal}' → {category}")
 
     def extract_signal(self, request):
         """Extract signal from request"""
@@ -67,19 +69,19 @@ class SignalProcessor:
             }
 
         except Exception as e:
-            print(f"💥 Parse error: {e}")
+            logger.error(f"💥 Parse error: {e}")
             return None
 
     def classify_signal(self, signal_data):
         """🎯 100% STRICT EXACT MATCH CLASSIFICATION - مع معالجة GROUP3 المحسنة"""
         if not signal_data or 'signal_type' not in signal_data:
-            print("❌ لا توجد بيانات إشارة أو نوع إشارة")
+            logger.error("❌ لا توجد بيانات إشارة أو نوع إشارة")
             return 'unknown'
 
         signal_type = signal_data['signal_type']
         signal_lower = signal_type.lower().strip()
         
-        print(f"🔍 تحليل الإشارة: '{signal_type}'")
+        logger.debug(f"🔍 تحليل الإشارة: '{signal_type}'")
         
         # 🛠️ الإصلاح: معالجة خاصة لإشارات GROUP3
         # إزالة البوادئ bullish_ و bearish_ للتحقق من GROUP3
@@ -105,63 +107,63 @@ class SignalProcessor:
         # 🎯 HIGHEST PRIORITY: Check for trend signals - 100% EXACT MATCH ONLY
         for trend_signal in trend_signals:
             if trend_signal == signal_lower:
-                print(f"🎯 تم التصنيف كإشارة اتجاه (تطابق تام 100%): '{signal_type}' → 'trend'")
+                logger.debug(f"🎯 تم التصنيف كإشارة اتجاه (تطابق تام 100%): '{signal_type}' → 'trend'")
                 return 'trend'
         
         # 🎯 Check for trend confirmation signals - 100% EXACT MATCH ONLY
         for trend_confirm_signal in trend_confirm_signals:
             if trend_confirm_signal == signal_lower:
-                print(f"🎯 تم التصنيف كتأكيد اتجاه (تطابق تام 100%): '{signal_type}' → 'trend_confirm'")
+                logger.debug(f"🎯 تم التصنيف كتأكيد اتجاه (تطابق تام 100%): '{signal_type}' → 'trend_confirm'")
                 return 'trend_confirm'
 
         # 🎯 Check for exit signals - 100% EXACT MATCH ONLY
         for exit_signal in exit_signals:
             if exit_signal == signal_lower:
-                print(f"🎯 تم التصنيف كإشارة خروج (تطابق تام 100%): '{signal_type}' → 'exit'")
+                logger.debug(f"🎯 تم التصنيف كإشارة خروج (تطابق تام 100%): '{signal_type}' → 'exit'")
                 return 'exit'
 
         # 🎯 Check group1 signals - 100% EXACT MATCH ONLY
         for signal in group1_bullish_signals:
             if signal == signal_lower:
-                print(f"🎯 تم التصنيف كدخول صاعد (مجموعة1 - تطابق تام 100%): '{signal_type}' → 'entry_bullish'")
+                logger.debug(f"🎯 تم التصنيف كدخول صاعد (مجموعة1 - تطابق تام 100%): '{signal_type}' → 'entry_bullish'")
                 return 'entry_bullish'
                 
         for signal in group1_bearish_signals:
             if signal == signal_lower:
-                print(f"🎯 تم التصنيف كدخول هابط (مجموعة1 - تطابق تام 100%): '{signal_type}' → 'entry_bearish'")
+                logger.debug(f"🎯 تم التصنيف كدخول هابط (مجموعة1 - تطابق تام 100%): '{signal_type}' → 'entry_bearish'")
                 return 'entry_bearish'
 
         # 🎯 Check group2 signals - 100% EXACT MATCH ONLY
         for signal in group2_bullish_signals:
             if signal == signal_lower:
-                print(f"🎯 تم التصنيف كدخول صاعد (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bullish1'")
+                logger.debug(f"🎯 تم التصنيف كدخول صاعد (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bullish1'")
                 return 'entry_bullish1'
                 
         for signal in group2_bearish_signals:
             if signal == signal_lower:
-                print(f"🎯 تم التصنيف كدخول هابط (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bearish1'")
+                logger.debug(f"🎯 تم التصنيف كدخول هابط (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bearish1'")
                 return 'entry_bearish1'
 
         # 🎯 Check group3 signals - 100% EXACT MATCH ONLY WITH SEPARATE LISTS + CLEANED SIGNALS
         for signal in group3_bullish_signals:
             if signal == signal_lower or signal == group3_signal_clean:
-                print(f"🎯 تم التصنيف كمجموعة ثالثة صاعدة (تطابق تام 100%): '{signal_type}' → 'group3'")
+                logger.debug(f"🎯 تم التصنيف كمجموعة ثالثة صاعدة (تطابق تام 100%): '{signal_type}' → 'group3'")
                 return 'group3'
                 
         for signal in group3_bearish_signals:
             if signal == signal_lower or signal == group3_signal_clean:
-                print(f"🎯 تم التصنيف كمجموعة ثالثة هابطة (تطابق تام 100%): '{signal_type}' → 'group3'")
+                logger.debug(f"🎯 تم التصنيف كمجموعة ثالثة هابطة (تطابق تام 100%): '{signal_type}' → 'group3'")
                 return 'group3'
 
         # 🚫 NO FALLBACK - NO KEYWORD MATCHING - NO PARTIAL MATCHING
-        print(f"❌ نوع إشارة غير معروف (لا يوجد تطابق تام 100%): '{signal_type}'")
-        print(f"📋 الإشارات المعروفة في المجموعات:")
-        print(f"   🔴 مجموعة1 صاعد: {group1_bullish_signals}")
-        print(f"   🔴 مجموعة1 هابط: {group1_bearish_signals}")
-        print(f"   🔵 مجموعة2 صاعد: {group2_bullish_signals}")
-        print(f"   🔵 مجموعة2 هابط: {group2_bearish_signals}")
-        print(f"   🟢 مجموعة3 صاعد: {group3_bullish_signals}")
-        print(f"   🟢 مجموعة3 هابط: {group3_bearish_signals}")
+        logger.warning(f"❌ نوع إشارة غير معروف (لا يوجد تطابق تام 100%): '{signal_type}'")
+        logger.debug(f"📋 الإشارات المعروفة في المجموعات:")
+        logger.debug(f"   🔴 مجموعة1 صاعد: {group1_bullish_signals}")
+        logger.debug(f"   🔴 مجموعة1 هابط: {group1_bearish_signals}")
+        logger.debug(f"   🔵 مجموعة2 صاعد: {group2_bullish_signals}")
+        logger.debug(f"   🔵 مجموعة2 هابط: {group2_bearish_signals}")
+        logger.debug(f"   🟢 مجموعة3 صاعد: {group3_bullish_signals}")
+        logger.debug(f"   🟢 مجموعة3 هابط: {group3_bearish_signals}")
         
         return 'unknown'
 
