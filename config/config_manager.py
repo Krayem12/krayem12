@@ -69,6 +69,9 @@ class ConfigManager:
             'RESET_TRADES_ON_TREND_CHANGE': os.getenv('RESET_TRADES_ON_TREND_CHANGE', 'true').lower() == 'true',
             'ENABLE_COUNTER_TREND_PRESERVATION': False,
 
+            # 🆕 إعداد تخزين الإشارات المخالفة
+            'STORE_CONTRARIAN_SIGNALS': os.getenv('STORE_CONTRARIAN_SIGNALS', 'false').lower() == 'true',
+
             # Notification Controls
             'SEND_TREND_MESSAGES': os.getenv('SEND_TREND_MESSAGES', 'false').lower() == 'true',
             'SEND_ENTRY_MESSAGES': os.getenv('SEND_ENTRY_MESSAGES', 'true').lower() == 'true',
@@ -331,6 +334,9 @@ class ConfigManager:
         logging.info(f"      • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
         if self.config['GROUP3_ENABLED']:
             logging.info(f"      • Required Group3: {self.config['REQUIRED_CONFIRMATIONS_GROUP3']}")
+        
+        # 🆕 عرض إعداد تخزين الإشارات المخالفة
+        logging.info("   🔄 تخزين الإشارات المخالفة: " + ("✅ مفعل" if self.config['STORE_CONTRARIAN_SIGNALS'] else "❌ معطل"))
         
         # 🆕 عرض إشارات GROUP3 المنفصلة
         if self.config['GROUP3_ENABLED']:

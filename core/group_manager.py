@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 class GroupManager:
-    """🎯 نظام إدارة المجموعات مع انتهاء صلاحية الإشارات"""
+    """🎯 نظام إدارة المجموعات مع تخزين الإشارات المخالفة"""
 
     def __init__(self, config, trade_manager):
         self.config = config
@@ -20,10 +20,10 @@ class GroupManager:
         self.error_log = []
         self.mode_performance = {}
         
-        logger.info("🎯 نظام المجموعات مع انتهاء صلاحية الإشارات جاهز")
+        logger.info("🎯 نظام المجموعات مع تخزين الإشارات المخالفة جاهز")
 
     def _determine_group3_direction_strict(self, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
-        """🎯 تحديد اتجاه GROUP3 بالتطابق التام 100% مع القوائم المنفصلة"""
+        """🎯 تحديد اتجاه GROUP3 بالتطابق التام 100% مع القوائم المنفصلة - إصلاح التحذير"""
         signal_type = signal_data['signal_type'].lower().strip()
         
         logger.debug(f"🔍 فحص إشارة GROUP3: '{signal_type}'")
@@ -66,12 +66,12 @@ class GroupManager:
             logger.debug(f"✅ تم التعرف على إشارة GROUP3 هابطة (تطابق تام): {signal_data['signal_type']}")
             return 'group3_bearish', 'sell'
         else:
-            logger.warning(f"❌ إشارة GROUP3 غير معروفة: {signal_data['signal_type']}")
-            logger.warning(f"🔍 تم فحص: '{signal_type}' و '{group3_signal_clean}'")
+            # 🛠️ الإصلاح: تغيير التحذير إلى تصحيح فقط - ليس خطأ
+            logger.debug(f"🔍 إشارة ليست من GROUP3: {signal_data['signal_type']} - هذه طبيعي للإشارات الأخرى")
             return None, None
 
     def route_signal(self, symbol: str, signal_data: Dict, classification: str) -> List[Dict]:
-        """🎯 توجيه الإشارة للمجموعة المناسبة مع تنظيف الإشارات المنتهية"""
+        """🎯 توجيه الإشارة للمجموعة المناسبة مع تخزين الإشارات المخالفة"""
         logger.debug("=" * 50)
         logger.debug(f"🔄 بدء توجيه الإشارة: {symbol} | {signal_data['signal_type']} | {classification}")
         logger.debug("=" * 50)
@@ -95,21 +95,28 @@ class GroupManager:
 
             logger.debug(f"✅ تم تحديد المجموعة: {group_type} والاتجاه: {direction}")
 
-            # 🔒 التحقق من محاذاة الاتجاه
-            logger.debug("🔍 التحقق من محاذاة الاتجاه...")
-            if not self._check_trend_alignment(symbol, direction):
-                logger.debug(f"🚫 الإشارة غير متوافقة مع الاتجاه: {symbol} -> {direction}")
-                return []
-
-            # 🚫 منع الإشارات المكررة
+            # 🚫 منع الإشارات المكررة (قبل التخزين)
             logger.debug("🔍 التحقق من التكرار...")
             if self._is_duplicate_signal(symbol, signal_data, group_type):
                 logger.debug("🔁 إشارة مكررة - تم تجاهلها")
                 return []
 
-            # ➕ إضافة الإشارة للمجموعة
+            # ➕ إضافة الإشارة للمجموعة (دائماً نخزنها أولاً)
             logger.debug(f"📥 إضافة الإشارة إلى المجموعة: {group_type}")
             self._add_signal_to_group(symbol, signal_data, group_type, direction, classification)
+
+            # 🔒 التحقق من محاذاة الاتجاه
+            logger.debug("🔍 التحقق من محاذاة الاتجاه...")
+            if not self._check_trend_alignment(symbol, direction):
+                # 🛠️ الخيار الثالث: التحكم في تخزين الإشارات المخالفة
+                store_contrarian = self.config.get('STORE_CONTRARIAN_SIGNALS', False)
+                if store_contrarian:
+                    logger.debug(f"📦 الإشارة مخالفة للاتجاه - تم تخزينها للاستخدام المستقبلي: {symbol} -> {direction}")
+                else:
+                    # إزالة الإشارة المخالفة إذا كان الخيار معطلاً
+                    logger.debug(f"🚫 الإشارة مخالفة للاتجاه - تم حذفها: {symbol} -> {direction}")
+                    self._remove_contrarian_signal(symbol, group_type, signal_data)
+                return []  # لا تفتح صفقات الآن
 
             # 📊 تقييم شروط الدخول
             logger.debug("📊 تقييم شروط الدخول...")
@@ -124,6 +131,34 @@ class GroupManager:
             logger.error(error_msg)
             self.error_log.append(error_msg)
             return []
+
+    def _remove_contrarian_signal(self, symbol: str, group_type: str, signal_data: Dict):
+        """🗑️ حذف الإشارة المخالفة من المجموعة"""
+        try:
+            group_key = symbol.upper().strip()
+            if group_key not in self.pending_signals:
+                return
+
+            # البحث عن الإشارة في المجموعة وحذفها (أحدث إشارة بنفس النوع)
+            group_signals = self.pending_signals[group_key][group_type]
+            
+            # البحث عن أحدث إشارة بنفس النوع
+            latest_index = -1
+            latest_timestamp = None
+            
+            for i, signal in enumerate(group_signals):
+                if signal.get('signal_type') == signal_data['signal_type']:
+                    signal_timestamp = signal.get('timestamp')
+                    if signal_timestamp and (latest_timestamp is None or signal_timestamp > latest_timestamp):
+                        latest_timestamp = signal_timestamp
+                        latest_index = i
+            
+            if latest_index >= 0:
+                removed_signal = group_signals.pop(latest_index)
+                logger.debug(f"🗑️ تم حذف الإشارة المخالفة: {removed_signal['signal_type']}")
+                
+        except Exception as e:
+            logger.error(f"⚠️ خطأ في حذف الإشارة المخالفة: {e}")
 
     def cleanup_expired_signals(self, symbol: str):
         """🧹 تنظيف الإشارات المنتهية الصلاحية بناء على وقت محدد"""
@@ -567,9 +602,3 @@ class GroupManager:
         except Exception as e:
             logger.error(f"❌ خطأ في تنظيف المجموعات: {e}")
             return False
-
-    # 🚫 تم حذف الدوال التالية تماماً:
-    # - clean_contrarian_signals_detailed
-    # - clean_contrarian_signals
-    # - _get_group_display_name
-    # - _calculate_signal_age

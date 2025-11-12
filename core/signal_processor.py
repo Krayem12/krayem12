@@ -96,7 +96,7 @@ class SignalProcessor:
             return 'unknown'
 
     def classify_signal(self, signal_data):
-        """🎯 100% STRICT EXACT MATCH CLASSIFICATION - مع تفاصيل تصحيح محسنة"""
+        """🎯 100% STRICT EXACT MATCH CLASSIFICATION - إصلاح الفحص المزدوج"""
         logger.debug(f"🔍 بدء تصنيف الإشارة: {signal_data}")
         
         if not signal_data or 'signal_type' not in signal_data:
@@ -112,15 +112,8 @@ class SignalProcessor:
         
         logger.debug(f"🔍 تحليل الإشارة: '{signal_type}' (بعد التطبيع: '{signal_lower}')")
         
-        # 🛠️ الإصلاح: معالجة خاصة لإشارات GROUP3
-        # إزالة البوادئ bullish_ و bearish_ للتحقق من GROUP3
-        group3_signal_clean = signal_lower
-        if signal_lower.startswith('bullish_'):
-            group3_signal_clean = signal_lower.replace('bullish_', '')
-            logger.debug(f"🔍 تنظيف إشارة GROUP3: '{signal_lower}' -> '{group3_signal_clean}'")
-        elif signal_lower.startswith('bearish_'):
-            group3_signal_clean = signal_lower.replace('bearish_', '')
-            logger.debug(f"🔍 تنظيف إشارة GROUP3: '{signal_lower}' -> '{group3_signal_clean}'")
+        # 🛠️ الإصلاح: إزالة معالجة GROUP3 غير الضرورية هنا
+        # يتم معالجة GROUP3 فقط في GroupManager وليس في التصنيف الأساسي
         
         # 🎯 100% STRICT EXACT MATCH: Convert all signals to lowercase for exact comparison
         trend_signals = [s.lower().strip() for s in self.signals.get('trend', [])]
@@ -190,16 +183,17 @@ class SignalProcessor:
                 return 'entry_bearish1'
 
         logger.debug(f"🔍 البحث في {len(group3_bullish_signals)} إشارة مجموعة3 صاعدة")
-        # 🎯 Check group3 signals - 100% EXACT MATCH ONLY WITH SEPARATE LISTS + CLEANED SIGNALS
+        # 🎯 Check group3 signals - 100% EXACT MATCH ONLY
+        # 🛠️ الإصلاح: إزالة التنظيف الزائد للإشارات - GROUP3 له إشاراته الخاصة فقط
         for signal in group3_bullish_signals:
-            if signal == signal_lower or signal == group3_signal_clean:
+            if signal == signal_lower:
                 logger.debug(f"🎯 تم التطابق مع مجموعة3 صاعدة: '{signal_type}' == '{signal}'")
                 logger.debug(f"🎯 تم التصنيف كمجموعة ثالثة صاعدة (تطابق تام 100%): '{signal_type}' → 'group3'")
                 return 'group3'
                 
         logger.debug(f"🔍 البحث في {len(group3_bearish_signals)} إشارة مجموعة3 هابطة")
         for signal in group3_bearish_signals:
-            if signal == signal_lower or signal == group3_signal_clean:
+            if signal == signal_lower:
                 logger.debug(f"🎯 تم التطابق مع مجموعة3 هابطة: '{signal_type}' == '{signal}'")
                 logger.debug(f"🎯 تم التصنيف كمجموعة ثالثة هابطة (تطابق تام 100%): '{signal_type}' → 'group3'")
                 return 'group3'
