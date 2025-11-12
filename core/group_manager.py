@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 class GroupManager:
-    """🎯 نظام إدارة المجموعات المُبسط والمُحسّن - تقارير تفصيلية عن التنظيف"""
+    """🎯 نظام إدارة المجموعات مع انتهاء صلاحية الإشارات"""
 
     def __init__(self, config, trade_manager):
         self.config = config
@@ -16,17 +16,14 @@ class GroupManager:
         # 🔄 تخزين الإشارات المؤقتة
         self.pending_signals = {}
         
-        # ⚠️ تم الاحتفاظ بالإعداد لكن لن يتم استخدامه للتنظيف الزمني
-        self.signal_max_age = timedelta(minutes=config.get('SIGNAL_CLEANUP_INTERVAL_MINUTES', 30))
-        
         # 📊 إحصائيات النظام
         self.error_log = []
         self.mode_performance = {}
         
-        logger.info("🎯 نظام المجموعات المُحسّن جاهز - تقارير تفصيلية عن التنظيف")
+        logger.info("🎯 نظام المجموعات مع انتهاء صلاحية الإشارات جاهز")
 
     def _determine_group3_direction_strict(self, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
-        """🎯 تحديد اتجاه GROUP3 بالتطابق التام 100% مع القوائم المنفصلة - الإصلاح النهائي"""
+        """🎯 تحديد اتجاه GROUP3 بالتطابق التام 100% مع القوائم المنفصلة"""
         signal_type = signal_data['signal_type'].lower().strip()
         
         logger.debug(f"🔍 فحص إشارة GROUP3: '{signal_type}'")
@@ -74,37 +71,90 @@ class GroupManager:
             return None, None
 
     def route_signal(self, symbol: str, signal_data: Dict, classification: str) -> List[Dict]:
-        """🎯 توجيه الإشارة للمجموعة المناسبة مع التحقق الشامل"""
+        """🎯 توجيه الإشارة للمجموعة المناسبة مع تنظيف الإشارات المنتهية"""
+        logger.debug("=" * 50)
+        logger.debug(f"🔄 بدء توجيه الإشارة: {symbol} | {signal_data['signal_type']} | {classification}")
+        logger.debug("=" * 50)
+        
         try:
+            # 🧹 تنظيف الإشارات المنتهية الصلاحية أولاً
+            self.cleanup_expired_signals(symbol)
+
             # ✅ التحقق الأولي من صحة البيانات
             if not self._validate_input(symbol, signal_data, classification):
+                logger.error("❌ فشل التحقق الأولي من البيانات")
                 return []
 
             # 🎯 تحديد المجموعة والاتجاه
+            logger.debug("🎯 تحديد المجموعة والاتجاه...")
             group_type, direction = self._determine_group_and_direction(classification, signal_data)
+            
             if not group_type:
                 logger.debug(f"❌ لم يتم تحديد مجموعة مناسبة للإشارة: {signal_data['signal_type']}")
                 return []
 
+            logger.debug(f"✅ تم تحديد المجموعة: {group_type} والاتجاه: {direction}")
+
             # 🔒 التحقق من محاذاة الاتجاه
+            logger.debug("🔍 التحقق من محاذاة الاتجاه...")
             if not self._check_trend_alignment(symbol, direction):
+                logger.debug(f"🚫 الإشارة غير متوافقة مع الاتجاه: {symbol} -> {direction}")
                 return []
 
             # 🚫 منع الإشارات المكررة
+            logger.debug("🔍 التحقق من التكرار...")
             if self._is_duplicate_signal(symbol, signal_data, group_type):
+                logger.debug("🔁 إشارة مكررة - تم تجاهلها")
                 return []
 
             # ➕ إضافة الإشارة للمجموعة
+            logger.debug(f"📥 إضافة الإشارة إلى المجموعة: {group_type}")
             self._add_signal_to_group(symbol, signal_data, group_type, direction, classification)
 
             # 📊 تقييم شروط الدخول
-            return self._evaluate_entry_conditions(symbol, direction)
+            logger.debug("📊 تقييم شروط الدخول...")
+            trade_results = self._evaluate_entry_conditions(symbol, direction)
+            
+            logger.debug(f"📈 نتيجة تقييم الشروط: {len(trade_results)} صفقة محتملة")
+            
+            return trade_results
 
         except Exception as e:
             error_msg = f"💥 خطأ في توجيه الإشارة: {symbol} | {str(e)}"
             logger.error(error_msg)
             self.error_log.append(error_msg)
             return []
+
+    def cleanup_expired_signals(self, symbol: str):
+        """🧹 تنظيف الإشارات المنتهية الصلاحية بناء على وقت محدد"""
+        try:
+            group_key = symbol.upper().strip()
+            if group_key not in self.pending_signals:
+                return
+
+            ttl_minutes = self.config.get('SIGNAL_TTL_MINUTES', 180)
+            expiration_time = datetime.now() - timedelta(minutes=ttl_minutes)
+            removed_count = 0
+
+            # 🎯 تنظيف جميع المجموعات
+            for group_type in ['group1_bullish', 'group1_bearish', 'group2_bullish', 
+                              'group2_bearish', 'group3_bullish', 'group3_bearish']:
+                
+                original_count = len(self.pending_signals[group_key][group_type])
+                
+                # تصفية الإشارات المنتهية
+                self.pending_signals[group_key][group_type] = [
+                    signal for signal in self.pending_signals[group_key][group_type]
+                    if signal.get('timestamp', datetime.now()) > expiration_time
+                ]
+                
+                removed_count += original_count - len(self.pending_signals[group_key][group_type])
+
+            if removed_count > 0:
+                logger.debug(f"🧹 تم حذف {removed_count} إشارة منتهية الصلاحية لـ {symbol} (عمر الإشارة: {ttl_minutes} دقيقة)")
+
+        except Exception as e:
+            logger.error(f"⚠️ خطأ في تنظيف الإشارات المنتهية الصلاحية: {e}")
 
     def _validate_input(self, symbol: str, signal_data: Dict, classification: str) -> bool:
         """✅ التحقق من صحة بيانات الإدخال"""
@@ -231,6 +281,7 @@ class GroupManager:
             group_key = symbol.upper().strip()
             
             if group_key not in self.pending_signals:
+                logger.debug(f"🔍 لا توجد إشارات لـ {symbol}")
                 return []
             
             # 📈 حساب عدد الإشارات لكل مجموعة
@@ -517,95 +568,8 @@ class GroupManager:
             logger.error(f"❌ خطأ في تنظيف المجموعات: {e}")
             return False
 
-    def clean_contrarian_signals_detailed(self, symbol: str, direction_to_remove: str) -> Dict:
-        """🧹 مسح الإشارات المخالفة للاتجاه الحالي مع تفاصيل كاملة"""
-        try:
-            group_key = symbol.upper().strip()
-            
-            if group_key not in self.pending_signals:
-                return {'removed_count': 0, 'removed_signals': []}
-            
-            # تحديد المجموعات التي يجب مسحها
-            groups_to_clear = []
-            if direction_to_remove == 'bullish':
-                groups_to_clear = ['group1_bullish', 'group2_bullish', 'group3_bullish']
-            else:
-                groups_to_clear = ['group1_bearish', 'group2_bearish', 'group3_bearish']
-            
-            # جمع المعلومات التفصيلية عن الإشارات التي سيتم مسحها
-            removed_signals = []
-            total_removed = 0
-            
-            for group_name in groups_to_clear:
-                group_signals = self.pending_signals[group_key][group_name]
-                
-                for signal in group_signals:
-                    # 🆕 جمع تفاصيل كاملة عن كل إشارة
-                    signal_details = {
-                        'signal_type': signal['signal_type'],
-                        'group': self._get_group_display_name(group_name),
-                        'original_group': group_name,
-                        'classification': signal.get('classification', 'unknown'),
-                        'direction': signal.get('direction', 'unknown'),
-                        'timestamp': signal.get('timestamp', datetime.now()),
-                        'age_minutes': self._calculate_signal_age(signal.get('timestamp'))
-                    }
-                    removed_signals.append(signal_details)
-                    total_removed += 1
-                
-                # مسح الإشارات من المجموعة
-                self.pending_signals[group_key][group_name] = []
-            
-            # تحديث وقت التحديث
-            self.pending_signals[group_key]["updated_at"] = datetime.now()
-            
-            logger.debug(f"🧹 تم مسح {total_removed} إشارة {direction_to_remove} مخالفة لـ {symbol}")
-            
-            # 🆕 إرجاع تقرير تفصيلي
-            return {
-                'removed_count': total_removed,
-                'removed_signals': removed_signals,
-                'direction_removed': direction_to_remove,
-                'symbol': symbol,
-                'cleaning_time': datetime.now()
-            }
-            
-        except Exception as e:
-            error_msg = f"⚠️ خطأ في مسح الإشارات المخالفة: {e}"
-            logger.error(error_msg)
-            return {'removed_count': 0, 'removed_signals': []}
-
-    def clean_contrarian_signals(self, symbol: str, direction_to_remove: str) -> int:
-        """🆕 دالة أساسية لتنظيف الإشارات المخالفة - للإستخدام في TradeManager"""
-        try:
-            detailed_result = self.clean_contrarian_signals_detailed(symbol, direction_to_remove)
-            return detailed_result.get('removed_count', 0)
-        except Exception as e:
-            logger.error(f"⚠️ خطأ في clean_contrarian_signals: {e}")
-            return 0
-
-    def _get_group_display_name(self, group_name: str) -> str:
-        """🆕 تحويل اسم المجموعة الداخلي إلى اسم مفهوم"""
-        group_mapping = {
-            'group1_bullish': '🟥 المجموعة 1 - صاعد',
-            'group1_bearish': '🟥 المجموعة 1 - هابط',
-            'group2_bullish': '🟦 المجموعة 2 - صاعد', 
-            'group2_bearish': '🟦 المجموعة 2 - هابط',
-            'group3_bullish': '🟩 المجموعة 3 - صاعد',
-            'group3_bearish': '🟩 المجموعة 3 - هابط'
-        }
-        return group_mapping.get(group_name, group_name)
-
-    def _calculate_signal_age(self, signal_timestamp) -> float:
-        """🆕 حساب عمر الإشارة بالدقائق"""
-        if not signal_timestamp:
-            return 0.0
-        
-        if isinstance(signal_timestamp, str):
-            try:
-                signal_timestamp = datetime.fromisoformat(signal_timestamp.replace('Z', '+00:00'))
-            except:
-                return 0.0
-        
-        age_seconds = (datetime.now() - signal_timestamp).total_seconds()
-        return round(age_seconds / 60, 1)
+    # 🚫 تم حذف الدوال التالية تماماً:
+    # - clean_contrarian_signals_detailed
+    # - clean_contrarian_signals
+    # - _get_group_display_name
+    # - _calculate_signal_age

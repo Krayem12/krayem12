@@ -8,7 +8,7 @@ from .validators import ConfigValidator
 # تحميل متغيرات البيئة من ملف .env
 load_dotenv()
 
-# 🛠️ الإصلاح: تهيئة النظام الأساسي للتسجيل أولاً
+# 🛠️ الإصلاح: تهيئة نظام الأساسي للتسجيل أولاً
 logging.basicConfig(
     level=logging.ERROR,  # المستوى الافتراضي حتى يتم تحميل الإعدادات
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -79,13 +79,16 @@ class ConfigManager:
             # Daily Cleanup Settings
             'DAILY_CLEANUP_ENABLED': os.getenv('DAILY_CLEANUP_ENABLED', 'true').lower() == 'true',
             'DAILY_CLEANUP_TIME': os.getenv('DAILY_CLEANUP_TIME', '01:00'),
+
+            # 🆕 إعدادات انتهاء صلاحية الإشارات
+            'SIGNAL_TTL_MINUTES': self._safe_int_convert('SIGNAL_TTL_MINUTES', 180),  # 180 دقيقة افتراضياً
         }
 
         self.port = self._robust_port_handling()
         self.config['PORT'] = self.port
         
         # 🛠️ الإصلاح: تطبيق مستوى التسجيل على جميع اللوجرات
-        self._apply_logging_config()
+        self._apply_logging_config_enhanced()
 
         # 🎯 تحميل الإشارات مع قوائم GROUP3 المنفصلة
         self.signals = {
@@ -108,40 +111,81 @@ class ConfigManager:
         self.setup_keywords()
         self.validate_configuration()
 
-    def _apply_logging_config(self):
-        """🛠️ تطبيق إعدادات التسجيل على جميع اللوجرات"""
+    def _apply_logging_config_enhanced(self):
+        """🛠️ الإصلاح المحسّن: تطبيق إعدادات التسجيل بشكل أكثر فعالية"""
         try:
             log_level = self.config['LOG_LEVEL']
             debug_mode = self.config['DEBUG']
             
+            print(f"🔧 تطبيق إعدادات التسجيل: DEBUG={debug_mode}, LOG_LEVEL={log_level}")
+            
             # تحديد مستوى التسجيل الفعلي
-            if log_level == 'ERROR':
-                level = logging.ERROR
-            elif log_level == 'WARNING':
-                level = logging.WARNING
-            elif log_level == 'INFO':
-                level = logging.INFO
-            elif log_level == 'DEBUG':
-                level = logging.DEBUG
-            else:
-                level = logging.INFO  # افتراضي
+            level_mapping = {
+                'ERROR': logging.ERROR,
+                'WARNING': logging.WARNING,
+                'INFO': logging.INFO,
+                'DEBUG': logging.DEBUG
+            }
+            level = level_mapping.get(log_level, logging.DEBUG)
             
-            # 🛠️ تطبيق على جميع اللوجرات
-            logging.getLogger().setLevel(level)
+            # 🛠️ الإصلاح: إعادة تهيئة نظام التسجيل بشكل كامل
+            for handler in logging.root.handlers[:]:
+                logging.root.removeHandler(handler)
+                
+            # إعادة التهيئة مع الإعدادات الجديدة
+            logging.basicConfig(
+                level=level,
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                force=True
+            )
             
-            # إذا كان DEBUG=false، نخفي الرسائل التفصيلية
+            # 🛠️ تطبيق مستوى التسجيل على جميع اللوجرات المعروفة في النظام
+            loggers_to_configure = [
+                '',  # اللوجر الرئيسي
+                '__main__',
+                'config_manager',
+                'webhook_handler', 
+                'signal_processor',
+                'trade_manager',
+                'group_manager',
+                'notification_manager',
+                'cleanup_manager',
+                'trading_system',
+                'core.webhook_handler',
+                'core.signal_processor',
+                'core.trade_manager',
+                'core.group_manager',
+                'notifications.notification_manager'
+            ]
+            
+            for logger_name in loggers_to_configure:
+                logger_instance = logging.getLogger(logger_name)
+                logger_instance.setLevel(level)
+                # إزالة أي معالجات قديمة
+                for handler in logger_instance.handlers[:]:
+                    logger_instance.removeHandler(handler)
+            
+            # 🛠️ إخفاء رسائل المكتبات الخارجية إذا كان DEBUG=false
             if not debug_mode:
-                # إخفاء رسائل التصحيح التفصيلية
-                logging.getLogger('werkzeug').setLevel(logging.WARNING)
-                logging.getLogger('schedule').setLevel(logging.WARNING)
-                logging.getLogger('urllib3').setLevel(logging.WARNING)
+                external_loggers = ['werkzeug', 'schedule', 'urllib3', 'requests']
+                for ext_logger in external_loggers:
+                    logging.getLogger(ext_logger).setLevel(logging.WARNING)
+            else:
+                # في وضع التصحيح، نسمح ببعض رسائل المكتبات
+                logging.getLogger('werkzeug').setLevel(logging.INFO)
             
-            logger.info(f"✅ تم تطبيق إعدادات التسجيل: LOG_LEVEL={log_level}, DEBUG={debug_mode}")
+            # 🎯 رسالة تأكيد على مستوى INFO حتى نراها دائماً
+            logging.info(f"✅ تم تطبيق إعدادات التسجيل: DEBUG={debug_mode}, LOG_LEVEL={log_level}")
+            print(f"🎯 إعدادات التسجيل النهائية: DEBUG={debug_mode}, LOG_LEVEL={log_level}")
+            
+            # 🆕 اختبار مباشر للوقو
+            logging.debug("🔍 اختبار رسالة DEBUG - يجب أن تظهر إذا كان DEBUG=true")
+            logging.info("ℹ️ اختبار رسالة INFO - يجب أن تظهر دائماً")
             
         except Exception as e:
-            logger.error(f"⚠️ خطأ في تطبيق إعدادات التسجيل: {e}")
+            print(f"❌ خطأ في تطبيق إعدادات التسجيل: {e}")
             # القيم الافتراضية في حالة الخطأ
-            logging.getLogger().setLevel(logging.ERROR)
+            logging.getLogger().setLevel(logging.DEBUG)
 
     def _robust_port_handling(self):
         """ROBUST port handling - works even with empty or invalid PORT"""
@@ -149,20 +193,20 @@ class ConfigManager:
             port_value = os.getenv('PORT', '').strip()
             
             if not port_value:
-                logger.info("🔧 PORT is empty or not set, using default: 10000")
+                logging.info("🔧 PORT is empty or not set, using default: 10000")
                 return 10000
             
             port_int = int(port_value)
             
             if 1 <= port_int <= 65535:
-                logger.info(f"✅ PORT successfully loaded: {port_int}")
+                logging.info(f"✅ PORT successfully loaded: {port_int}")
                 return port_int
             else:
-                logger.warning(f"⚠️ PORT {port_int} is out of range (1-65535), using default: 10000")
+                logging.warning(f"⚠️ PORT {port_int} is out of range (1-65535), using default: 10000")
                 return 10000
                 
         except (ValueError, TypeError) as e:
-            logger.error(f"⚠️ Invalid PORT value '{os.getenv('PORT')}', using default 10000: {e}")
+            logging.error(f"⚠️ Invalid PORT value '{os.getenv('PORT')}', using default 10000: {e}")
             return 10000
 
     def _safe_int_convert(self, env_key, default):
@@ -178,7 +222,7 @@ class ConfigManager:
 
             return int(cleaned_value)
         except (ValueError, TypeError) as e:
-            logger.error(f"⚠️ Invalid {env_key} value '{os.getenv(env_key)}', using default {default}: {e}")
+            logging.error(f"⚠️ Invalid {env_key} value '{os.getenv(env_key)}', using default {default}: {e}")
             return default
 
     def _load_signal_list(self, env_key, default_signals=""):
@@ -187,13 +231,13 @@ class ConfigManager:
             signal_str = os.getenv(env_key, default_signals)
             if signal_str:
                 signals = [s.strip() for s in signal_str.split(',') if s.strip()]
-                logger.info(f"   ✅ Loaded {len(signals)} signals from {env_key}")
+                logging.info(f"   ✅ Loaded {len(signals)} signals from {env_key}")
                 return signals
             else:
-                logger.warning(f"   ⚠️ No signals found for {env_key}, using defaults")
+                logging.warning(f"   ⚠️ No signals found for {env_key}, using defaults")
                 return [s.strip() for s in default_signals.split(',') if s.strip()]
         except Exception as e:
-            logger.error(f"   ❌ Error loading {env_key}: {e}, using defaults")
+            logging.error(f"   ❌ Error loading {env_key}: {e}, using defaults")
             return [s.strip() for s in default_signals.split(',') if s.strip()]
 
     def setup_keywords(self):
@@ -215,58 +259,62 @@ class ConfigManager:
             'group3': [kw.strip() for kw in group3_kw.split(',') if kw.strip()]
         }
         
-        logger.info("🚨 ملاحظة: نظام الكلمات المفتاحية غير مفعل - التطابق التام فقط")
+        logging.info("🚨 ملاحظة: نظام الكلمات المفتاحية غير مفعل - التطابق التام فقط")
 
     def validate_configuration(self):
         """Validate system configuration"""
-        logger.info("\n🔍 Validating configuration...")
+        logging.info("\n🔍 Validating configuration...")
         
         errors, warnings = ConfigValidator.validate_config(self.config)
         
         if errors or warnings:
             validation_report = ConfigValidator.format_validation_report(errors, warnings)
-            logger.info(f"📋 Configuration Validation Report:\n{validation_report}")
+            logging.info(f"📋 Configuration Validation Report:\n{validation_report}")
             
             if errors:
-                logger.error("❌ Critical configuration errors detected")
+                logging.error("❌ Critical configuration errors detected")
                 raise ValueError("Critical configuration errors detected")
             else:
-                logger.warning("⚠️ Configuration has warnings but will continue...")
+                logging.warning("⚠️ Configuration has warnings but will continue...")
         else:
-            logger.info("✅ All configuration validations passed")
+            logging.info("✅ All configuration validations passed")
 
     def display_config(self):
         """Display loaded configuration for verification"""
-        logger.info("\n🔧 LOADED CONFIGURATION:")
-        logger.info("   📱 Telegram: " + ("✅ ENABLED" if self.config['TELEGRAM_ENABLED'] else "❌ DISABLED"))
-        logger.info("   🌐 External Server: " + ("✅ ENABLED" if self.config['EXTERNAL_SERVER_ENABLED'] else "❌ DISABLED"))
-        logger.info("   🧹 Daily Cleanup: " + ("✅ ENABLED" if self.config['DAILY_CLEANUP_ENABLED'] else "❌ DISABLED"))
+        logging.info("\n🔧 LOADED CONFIGURATION:")
+        logging.info("   📱 Telegram: " + ("✅ ENABLED" if self.config['TELEGRAM_ENABLED'] else "❌ DISABLED"))
+        logging.info("   🌐 External Server: " + ("✅ ENABLED" if self.config['EXTERNAL_SERVER_ENABLED'] else "❌ DISABLED"))
+        logging.info("   🧹 Daily Cleanup: " + ("✅ ENABLED" if self.config['DAILY_CLEANUP_ENABLED'] else "❌ DISABLED"))
         if self.config['DAILY_CLEANUP_ENABLED']:
-            logger.info(f"   🕐 Cleanup Time: {self.config['DAILY_CLEANUP_TIME']}")
+            logging.info(f"   🕐 Cleanup Time: {self.config['DAILY_CLEANUP_TIME']}")
         
         # 🎯 MULTI-MODE: Display Multi-Mode Strategy Settings
-        logger.info("   🎯 Multi-Mode Trading Strategy:")
-        logger.info(f"      • Mode: {self.config['TRADING_MODE']}")
-        logger.info(f"      • Mode1: {self.config['TRADING_MODE1']} ({'✅ ENABLED' if self.config['TRADING_MODE1_ENABLED'] else '❌ DISABLED'})")
-        logger.info(f"      • Mode2: {self.config['TRADING_MODE2']} ({'✅ ENABLED' if self.config['TRADING_MODE2_ENABLED'] else '❌ DISABLED'})")
+        logging.info("   🎯 Multi-Mode Trading Strategy:")
+        logging.info(f"      • Mode: {self.config['TRADING_MODE']}")
+        logging.info(f"      • Mode1: {self.config['TRADING_MODE1']} ({'✅ ENABLED' if self.config['TRADING_MODE1_ENABLED'] else '❌ DISABLED'})")
+        logging.info(f"      • Mode2: {self.config['TRADING_MODE2']} ({'✅ ENABLED' if self.config['TRADING_MODE2_ENABLED'] else '❌ DISABLED'})")
         
-        logger.info(f"      • Group1 Trend Mode: {self.config['GROUP1_TREND_MODE']}")
-        logger.info(f"      • Required Group1: {self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
-        logger.info(f"      • Group2 Enabled: {'✅ YES' if self.config['GROUP2_ENABLED'] else '❌ NO'}")
+        logging.info(f"      • Group1 Trend Mode: {self.config['GROUP1_TREND_MODE']}")
+        logging.info(f"      • Required Group1: {self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
+        logging.info(f"      • Group2 Enabled: {'✅ YES' if self.config['GROUP2_ENABLED'] else '❌ NO'}")
         if self.config['GROUP2_ENABLED']:
-            logger.info(f"      • Required Group2: {self.config['REQUIRED_CONFIRMATIONS_GROUP2']}")
-        logger.info(f"      • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
+            logging.info(f"      • Required Group2: {self.config['REQUIRED_CONFIRMATIONS_GROUP2']}")
+        logging.info(f"      • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
         if self.config['GROUP3_ENABLED']:
-            logger.info(f"      • Required Group3: {self.config['REQUIRED_CONFIRMATIONS_GROUP3']}")
+            logging.info(f"      • Required Group3: {self.config['REQUIRED_CONFIRMATIONS_GROUP3']}")
         
         # 🆕 عرض إشارات GROUP3 المنفصلة
         if self.config['GROUP3_ENABLED']:
-            logger.info("   🟢 Group3 Signals:")
-            logger.info(f"      • Bullish: {len(self.signals['group3_bullish'])} signals")
-            logger.info(f"      • Bearish: {len(self.signals['group3_bearish'])} signals")
+            logging.info("   🟢 Group3 Signals:")
+            logging.info(f"      • Bullish: {len(self.signals['group3_bullish'])} signals")
+            logging.info(f"      • Bearish: {len(self.signals['group3_bearish'])} signals")
         
-        logger.info("   📊 Message Controls:")
-        logger.info("      • Trend Messages: " + ("✅ ON" if self.config['SEND_TREND_MESSAGES'] else "❌ OFF"))
-        logger.info("      • Entry Messages: " + ("✅ ON" if self.config['SEND_ENTRY_MESSAGES'] else "❌ OFF"))
-        logger.info("      • Exit Messages: " + ("✅ ON" if self.config['SEND_EXIT_MESSAGES'] else "❌ OFF"))
-        logger.info(f"   🌐 Server Port: {self.port}")
+        # 🆕 عرض إعدادات انتهاء صلاحية الإشارات
+        logging.info("   ⏰ Signal Expiration Settings:")
+        logging.info(f"      • Signal TTL: {self.config['SIGNAL_TTL_MINUTES']} minutes")
+        
+        logging.info("   📊 Message Controls:")
+        logging.info("      • Trend Messages: " + ("✅ ON" if self.config['SEND_TREND_MESSAGES'] else "❌ OFF"))
+        logging.info("      • Entry Messages: " + ("✅ ON" if self.config['SEND_ENTRY_MESSAGES'] else "❌ OFF"))
+        logging.info("      • Exit Messages: " + ("✅ ON" if self.config['SEND_EXIT_MESSAGES'] else "❌ OFF"))
+        logging.info(f"   🌐 Server Port: {self.port}")

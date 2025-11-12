@@ -7,7 +7,7 @@ from flask import request, jsonify
 logger = logging.getLogger(__name__)
 
 class WebhookHandler:
-    """Webhook receiver for processing incoming alerts - COMPLETE LOGGING FIX"""
+    """Webhook receiver for processing incoming alerts - WITHOUT SIGNAL CLEANUP"""
 
     def __init__(self, config, signal_processor, group_manager, trade_manager, notification_manager, cleanup_manager):
         self.config = config
@@ -136,9 +136,15 @@ class WebhookHandler:
         return True
 
     def handle_webhook(self):
+        # 🛠️ الإصلاح: تفعيل التسجيل المفصل في بداية كل طلب
+        logger.debug("=" * 60)
+        logger.debug("📥 📥 📥 طلب واردة جديدة إلى الويب هووك 📥 📥 📥")
+        logger.debug("=" * 60)
+        
         try:
             raw = request.data.decode('utf-8').strip()
-            logger.debug(f"📥 طلب واردة: {raw[:200]}...")
+            logger.debug(f"📨 البيانات الخام المستلمة: {raw[:200]}...")
+            logger.debug(f"🔍 رؤوس الطلب: {dict(request.headers)}")
 
             # 1) جرّب JSON أولاً
             data = None
@@ -146,7 +152,9 @@ class WebhookHandler:
             try:
                 if raw and raw.strip():
                     data = json.loads(raw)
-                    logger.debug(f"✅ تم تحليل JSON بنجاح: {list(data.keys())}")
+                    logger.debug(f"✅ تم تحليل JSON بنجاح: {data}")
+                else:
+                    logger.warning("⚠️ البيانات الخام فارغة")
             except json.JSONDecodeError as e:
                 json_parse_error = f"خطأ في تحليل JSON: {e}"
                 logger.debug(f"❌ {json_parse_error}")
@@ -160,6 +168,7 @@ class WebhookHandler:
             if not data:
                 logger.debug("🔍 محاولة التحليل النصي...")
                 symbol, signal_type = self._parse_plaintext_alert(raw)
+                logger.debug(f"📝 نتيجة التحليل النصي: {symbol} -> {signal_type}")
                 
                 # 🆕 التحقق من صحة البيانات المستخرجة
                 if not self._validate_signal_data(symbol, signal_type):
@@ -175,18 +184,12 @@ class WebhookHandler:
             symbol = data["symbol"].upper().strip()
             signal_type = data["signal_type"].strip()
 
+            logger.debug(f"🎯 بيانات الإشارة المستخرجة: رمز={symbol}, إشارة={signal_type}")
+
             # 🆕 التحقق النهائي من صحة البيانات
             if not self._validate_signal_data(symbol, signal_type):
+                logger.error(f"❌ تحقق فاشل: {symbol} -> {signal_type}")
                 return jsonify({"error": "Invalid symbol or signal type"}), 400
-
-            # حماية من حالات مثل "KRAYEM Signal" الناتجة عن سطر واحد فيه حقلين
-            if "signal" in signal_type.lower() and ":" in raw.lower():
-                try:
-                    m_last_signal = list(re.finditer(r'(?i)\bsignal\s*:\s*([A-Za-z0-9_+\- ]+)', raw))
-                    if m_last_signal:
-                        signal_type = m_last_signal[-1].group(1).strip()
-                except Exception:
-                    pass
 
             signal_data = {
                 "symbol": symbol,
@@ -194,16 +197,19 @@ class WebhookHandler:
                 "timestamp": data.get("timestamp")
             }
 
-            logger.debug(f"🔍 معالجة الإشارة: {symbol} -> {signal_type}")
+            logger.debug(f"🔍 بدء معالجة الإشارة: {symbol} -> {signal_type}")
 
-            # 🆕 استخدام التصنيف الآمن
+            # 🆕 استخدام التصنيف الآمن مع تفاصيل أكثر
+            logger.debug("🎯 بدء تصنيف الإشارة...")
             classification = self.signal_processor.safe_classify_signal(signal_data)
+
+            logger.debug(f"🎯 نتيجة التصنيف: {classification}")
 
             if not classification or classification == 'unknown':
                 logger.warning(f"⚠️ نوع إشارة غير معروف بعد التصنيف: '{signal_type}' للرمز {symbol}")
                 return jsonify({"error": f"Unknown signal: {signal_type}"}), 400
 
-            logger.debug(f"🎯 تصنيف الإشارة: {classification}")
+            logger.debug(f"✅ تم تصنيف الإشارة بنجاح: {classification}")
 
             # ✅ إشارات الاتجاه — لا تفتح صفقات
             if classification in ['trend', 'trend_confirm']:
@@ -212,8 +218,28 @@ class WebhookHandler:
                 # استخدام الدالة المعدلة التي ترجع ما إذا كان يجب الإبلاغ والاتجاه السابق
                 should_report, old_trend = self.trade_manager.update_trend(symbol, classification, signal_data)
                 
-                # 🆕 إصلاح: استخدام معالجة آمنة للإشعارات
-                self._safe_send_trend_notification(symbol, signal_data, should_report, old_trend)
+                # 🆕 إرسال إشعار الاتجاه فقط بدون تنظيف
+                if should_report and self.notification_manager.should_send_message('trend'):
+                    from notifications.message_formatter import MessageFormatter
+                    
+                    new_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
+                    
+                    try:
+                        trend_message = MessageFormatter.format_trend_message(
+                            signal_data, 
+                            new_trend,
+                            old_trend or "UNKNOWN"
+                        )
+                    except AttributeError:
+                        trend_message = MessageFormatter.format_simple_trend_message(
+                            symbol=symbol,
+                            new_trend=new_trend,
+                            old_trend=old_trend or "UNKNOWN",
+                            trigger_signal=signal_data['signal_type']
+                        )
+                    
+                    self.notification_manager.send_notifications(trend_message, 'trend')
+                    logger.debug(f"📤 تم إرسال إشعار تغيير الاتجاه لـ {symbol}")
                 
                 return jsonify({
                     "status": "trend_processed", 
@@ -320,42 +346,5 @@ class WebhookHandler:
             logger.error(f"💥 خطأ في معالجة الويب هووك: {e}")
             return jsonify({"error": str(e)}), 500
 
-    def _safe_send_trend_notification(self, symbol: str, signal_data: dict, should_report: bool, old_trend: str):
-        """🆕 معالجة آمنة لإرسال إشعارات الاتجاه"""
-        try:
-            if should_report and self.notification_manager.should_send_message('trend'):
-                from notifications.message_formatter import MessageFormatter
-                
-                new_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
-                
-                # 🆕 محاولة استخدام الدالة الأساسية أولاً
-                try:
-                    trend_message = MessageFormatter.format_trend_message(
-                        signal_data, 
-                        new_trend,
-                        old_trend or "UNKNOWN"
-                    )
-                except AttributeError:
-                    # 🆕 إذا فشلت، استخدم الدالة المبسطة
-                    logger.debug("⚠️ استخدام الدالة البديلة format_simple_trend_message")
-                    trend_message = MessageFormatter.format_simple_trend_message(
-                        symbol=symbol,
-                        new_trend=new_trend,
-                        old_trend=old_trend or "UNKNOWN",
-                        trigger_signal=signal_data['signal_type']
-                    )
-                
-                self.notification_manager.send_notifications(trend_message, 'trend')
-                logger.debug(f"📤 تم إرسال إشعار تغيير الاتجاه لـ {symbol}: {old_trend} → {new_trend}")
-            else:
-                logger.debug(f"🔇 لم يتم إرسال إشعار الاتجاه لـ {symbol} (لا تغيير حقيقي أو إشعارات معطلة)")
-                
-        except Exception as e:
-            logger.error(f"⚠️ خطأ في إرسال إشعار الاتجاه: {e}")
-            # محاولة إرسال رسالة بديلة بسيطة
-            try:
-                new_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
-                simple_msg = f"📊 تغيير الاتجاه: {symbol} | {old_trend} → {new_trend} | الإشارة: {signal_data['signal_type']}"
-                self.notification_manager.send_notifications(simple_msg, 'trend')
-            except:
-                logger.error(f"❌ فشل إرسال الرسالة البديلة أيضًا")
+    # 🚫 تم حذف الدوال التالية:
+    # - _safe_send_trend_notification
