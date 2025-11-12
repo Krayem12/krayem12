@@ -35,7 +35,7 @@ class TradingSystem:
         """Setup all manager classes with cross-references"""
         self.config_manager = ConfigManager()
         self.config = self.config_manager.config
-        self.signals = self.config_manager.signals
+        self.signals = self.config_manager.signals  # 🛠️ حفظ المرجع للإشارات
         self.keywords = self.config_manager.keywords
         self.port = self.config_manager.port
 

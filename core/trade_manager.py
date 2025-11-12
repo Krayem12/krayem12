@@ -94,7 +94,7 @@ class TradeManager:
                 cleaning_result = self.group_manager.clean_contrarian_signals_detailed(symbol, direction_to_remove)
             else:
                 # استخدام الدالة الأساسية كبديل
-                removed_count = self.group_manager.clean_contrarian_signals(symbol, direction_to_remove)
+                removed_count = self._clean_contrarian_signals_basic(symbol, direction_to_remove)
                 cleaning_result = {'removed_count': removed_count, 'removed_signals': []}
             
             if cleaning_result and cleaning_result.get('removed_count', 0) > 0:
@@ -107,6 +107,35 @@ class TradeManager:
         except Exception as e:
             logger.error(f"⚠️ خطأ في تنظيف الإشارات المخالفة: {e}")
             return {}
+
+    def _clean_contrarian_signals_basic(self, symbol: str, direction_to_remove: str) -> int:
+        """🆕 دالة أساسية لتنظيف الإشارات المخالفة"""
+        try:
+            if not self.group_manager:
+                return 0
+                
+            group_key = symbol.upper().strip()
+            if group_key not in self.group_manager.pending_signals:
+                return 0
+            
+            # تحديد المجموعات التي يجب مسحها
+            groups_to_clear = []
+            if direction_to_remove == 'bullish':
+                groups_to_clear = ['group1_bullish', 'group2_bullish', 'group3_bullish']
+            else:
+                groups_to_clear = ['group1_bearish', 'group2_bearish', 'group3_bearish']
+            
+            total_removed = 0
+            for group_name in groups_to_clear:
+                signal_count = len(self.group_manager.pending_signals[group_key][group_name])
+                self.group_manager.pending_signals[group_key][group_name] = []
+                total_removed += signal_count
+            
+            return total_removed
+            
+        except Exception as e:
+            logger.error(f"⚠️ خطأ في التنظيف الأساسي: {e}")
+            return 0
 
     def _send_detailed_trend_notification(self, symbol: str, new_trend: str, old_trend: str, cleaning_details: Dict, signal_data: Dict):
         """🆕 إرسال إشعار تفصيلي عن تغيير الاتجاه والتنظيف - منع التكرار"""

@@ -118,6 +118,23 @@ class WebhookHandler:
         logger.info(f"📋 تلميح: استخدم التنسيق 'SYMBOL SIGNAL_TYPE' مثل 'TSLA bullish_catcher'")
         return None, None
 
+    def _validate_signal_data(self, symbol: str, signal_type: str) -> bool:
+        """🆕 التحقق من صحة بيانات الإشارة"""
+        if not symbol or symbol == 'UNKNOWN':
+            logger.error("❌ رمز غير صالح")
+            return False
+            
+        if not signal_type or not signal_type.strip():
+            logger.error("❌ نوع الإشارة فارغ")
+            return False
+            
+        # التحقق من أن الرمز يحتوي على أحرف وأرقام فقط
+        if not re.match(r'^[A-Z0-9]{1,10}$', symbol):
+            logger.error(f"❌ تنسيق الرمز غير صالح: {symbol}")
+            return False
+            
+        return True
+
     def handle_webhook(self):
         try:
             raw = request.data.decode('utf-8').strip()
@@ -143,17 +160,24 @@ class WebhookHandler:
             if not data:
                 logger.debug("🔍 محاولة التحليل النصي...")
                 symbol, signal_type = self._parse_plaintext_alert(raw)
-                if not symbol or not signal_type:
-                    error_msg = "❌ لم يتمكن النظام من استخراج symbol أو signal_type من الرسالة"
+                
+                # 🆕 التحقق من صحة البيانات المستخرجة
+                if not self._validate_signal_data(symbol, signal_type):
+                    error_msg = "❌ بيانات الإشارة غير صالحة"
                     if json_parse_error:
                         error_msg += f" (أخطاء JSON: {json_parse_error})"
                     logger.error(error_msg)
                     return jsonify({"error": "Invalid alert format"}), 400
+                    
                 data = {"symbol": symbol, "signal_type": signal_type}
 
             # Normalize
             symbol = data["symbol"].upper().strip()
             signal_type = data["signal_type"].strip()
+
+            # 🆕 التحقق النهائي من صحة البيانات
+            if not self._validate_signal_data(symbol, signal_type):
+                return jsonify({"error": "Invalid symbol or signal type"}), 400
 
             # حماية من حالات مثل "KRAYEM Signal" الناتجة عن سطر واحد فيه حقلين
             if "signal" in signal_type.lower() and ":" in raw.lower():
@@ -172,7 +196,8 @@ class WebhookHandler:
 
             logger.debug(f"🔍 معالجة الإشارة: {symbol} -> {signal_type}")
 
-            classification = self.signal_processor.classify_signal(signal_data)
+            # 🆕 استخدام التصنيف الآمن
+            classification = self.signal_processor.safe_classify_signal(signal_data)
 
             if not classification or classification == 'unknown':
                 logger.warning(f"⚠️ نوع إشارة غير معروف بعد التصنيف: '{signal_type}' للرمز {symbol}")

@@ -72,6 +72,28 @@ class SignalProcessor:
             logger.error(f"💥 Parse error: {e}")
             return None
 
+    def safe_classify_signal(self, signal_data):
+        """🆕 تصنيف آمن مع معالجة الأخطاء المحسنة"""
+        try:
+            if not signal_data:
+                logger.error("❌ بيانات الإشارة فارغة")
+                return 'unknown'
+                
+            if 'signal_type' not in signal_data:
+                logger.error("❌ نوع الإشارة مفقود في البيانات")
+                return 'unknown'
+                
+            signal_type = signal_data.get('signal_type', '').strip()
+            if not signal_type:
+                logger.error("❌ نوع الإشارة فارغ")
+                return 'unknown'
+                
+            return self.classify_signal(signal_data)
+            
+        except Exception as e:
+            logger.error(f"💥 خطأ في التصنيف الآمن: {e}")
+            return 'unknown'
+
     def classify_signal(self, signal_data):
         """🎯 100% STRICT EXACT MATCH CLASSIFICATION - مع معالجة GROUP3 المحسنة"""
         if not signal_data or 'signal_type' not in signal_data:
@@ -79,6 +101,10 @@ class SignalProcessor:
             return 'unknown'
 
         signal_type = signal_data['signal_type']
+        if not signal_type or not signal_type.strip():
+            logger.error("❌ نوع الإشارة فارغ")
+            return 'unknown'
+            
         signal_lower = signal_type.lower().strip()
         
         logger.debug(f"🔍 تحليل الإشارة: '{signal_type}'")
@@ -169,6 +195,9 @@ class SignalProcessor:
 
     def validate_signal_strict(self, signal_type):
         """🎯 التحقق الصارم من وجود الإشارة في أي قائمة"""
+        if not signal_type or not signal_type.strip():
+            return False, None
+            
         signal_lower = signal_type.lower().strip()
         
         # 🛠️ الإصلاح: معالجة خاصة لإشارات GROUP3

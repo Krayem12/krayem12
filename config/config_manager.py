@@ -63,9 +63,6 @@ class ConfigManager:
             'GROUP3_ENABLED': os.getenv('GROUP3_ENABLED', 'true').lower() == 'true',
             'REQUIRED_CONFIRMATIONS_GROUP3': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP3', 1),
 
-            # 🆕 إزالة: إعدادات التنظيف المضللة
-            # 'SIGNAL_CLEANUP_INTERVAL_MINUTES': self._safe_int_convert('SIGNAL_CLEANUP_INTERVAL_MINUTES', 5),
-
             # Trend Settings
             'RESPECT_TREND_FOR_REGULAR_TRADES': os.getenv('RESPECT_TREND_FOR_REGULAR_TRADES', 'true').lower() == 'true',
             'RESPECT_TREND_FOR_GROUP2': os.getenv('RESPECT_TREND_FOR_GROUP2', 'true').lower() == 'true',
@@ -92,18 +89,21 @@ class ConfigManager:
 
         # 🎯 تحميل الإشارات مع قوائم GROUP3 المنفصلة
         self.signals = {
-            'trend': self._load_signal_list('TREND_SIGNALS', 'switch_bullish_catcher,switch_bearish_catcher,bullish_catcher,bearish_catcher'),
-            'trend_confirm': self._load_signal_list('TREND_CONFIRM_SIGNALS', 'switch_bullish_tracer,switch_bearish_tracer'),
-            'entry_bullish': self._load_signal_list('ENTRY_SIGNALS_BULLISH', 'bullish moneyflow_co_50,oversold_bullish_hyperwave_signal,bullish_divergence'),
-            'entry_bearish': self._load_signal_list('ENTRY_SIGNALS_BEARISH', 'Bearish moneyflow_cu_50,overbought_bearish_hyperwave_signal,bearish_divergence'),
-            'exit': self._load_signal_list('EXIT_SIGNALS', 'bullish_exit,bearish_exit,take_profit,stop_loss'),
+            'trend': self._load_signal_list('TREND_SIGNALS', 'bullish_tracer,bearish_tracer'),
+            'trend_confirm': self._load_signal_list('TREND_CONFIRM_SIGNALS', 'rayian'),
+            'entry_bullish': self._load_signal_list('ENTRY_SIGNALS_BULLISH', 'oversold_bullish_hyperwave_signal,regular_bullish_hyperwave_signal'),
+            'entry_bearish': self._load_signal_list('ENTRY_SIGNALS_BEARISH', 'overbought_bearish_hyperwave_signal,regular_bullish_hyperwave_signal'),
+            'exit': self._load_signal_list('EXIT_SIGNALS', 'exit_buy,exit_sell'),
             'general': self._load_signal_list('GENERAL_SIGNALS', 'krayem yhia alanizy'),
-            'entry_bullish1': self._load_signal_list('ENTRY_SIGNALS_BULLISH1', 'Discount'),
-            'entry_bearish1': self._load_signal_list('ENTRY_SIGNALS_BEARISH1', 'Premium'),
+            'entry_bullish1': self._load_signal_list('ENTRY_SIGNALS_BULLISH1', 'Discount,bullish_catcher'),
+            'entry_bearish1': self._load_signal_list('ENTRY_SIGNALS_BEARISH1', 'Premium,bearish_catcher'),
             # 🆕 قوائم GROUP3 المنفصلة للإشارات الصاعدة والهابطة
-            'group3_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BULLISH', 'moneyflow_above_50,moneyflow_co_50'),
-            'group3_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BEARISH', 'moneyflow_below_50,moneyflow_cu_50')
+            'group3_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BULLISH', 'bullish_moneyflow_above_50,bullish_moneyflow_co_50'),
+            'group3_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BEARISH', 'bearish_moneyflow_below_50,bearish_moneyflow_cu_50')
         }
+
+        # 🛠️ الإصلاح: إضافة الإشارات إلى config للوصول العالمي
+        self.config['signals'] = self.signals
 
         self.setup_keywords()
         self.validate_configuration()
@@ -258,11 +258,6 @@ class ConfigManager:
         logger.info(f"      • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
         if self.config['GROUP3_ENABLED']:
             logger.info(f"      • Required Group3: {self.config['REQUIRED_CONFIRMATIONS_GROUP3']}")
-        
-        # 🆕 إزالة: إعدادات التنظيف المضللة
-        # logger.info("   ⚙️ Cleanup Settings:")
-        # logger.info(f"      • Cleanup Interval: {cleanup_interval} minutes")
-        # logger.info(f"      • Signal Max Age: {cleanup_interval * 3} minutes (تلقائي)")
         
         # 🆕 عرض إشارات GROUP3 المنفصلة
         if self.config['GROUP3_ENABLED']:
