@@ -3,11 +3,12 @@ import json
 import re
 import logging
 from flask import request, jsonify
+from notifications.message_formatter import MessageFormatter  # 🆕 إضافة الاستيراد
 
 logger = logging.getLogger(__name__)
 
 class WebhookHandler:
-    """Webhook receiver for processing incoming alerts - IMPROVED CONTENT HANDLING"""
+    """Webhook receiver for processing incoming alerts - مع التحقق من الاستراتيجية"""
 
     def __init__(self, config, signal_processor, group_manager, trade_manager, notification_manager, cleanup_manager):
         self.config = config
@@ -117,7 +118,7 @@ class WebhookHandler:
         return True
 
     def handle_webhook(self):
-        """🛠️ الإصدار المحسن النهائي - بدون رسائل JSON غير ضرورية"""
+        """🛠️ الإصدار المحسن النهائي - مع التحقق من تطبيق الاستراتيجية"""
         logger.debug("=" * 60)
         logger.debug("📥 📥 📥 طلب واردة جديدة إلى الويب هووك 📥 📥 📥")
         logger.debug("=" * 60)
@@ -259,6 +260,15 @@ class WebhookHandler:
             
             trade_results = self.group_manager.route_signal(symbol, signal_data, classification)
             
+            # 🆕 التحقق من أن الاستراتيجية المطبقة تتطابق مع الإعدادات
+            for trade_result in trade_results:
+                mode_key = trade_result.get('mode_key', 'TRADING_MODE')
+                applied_strategy = trade_result.get('strategy_type')
+                expected_strategy = self.config.get(mode_key, 'GROUP1')
+                
+                if applied_strategy != expected_strategy:
+                    logger.error(f"❌ تناقض استراتيجية: {applied_strategy} vs {expected_strategy} للنمط {mode_key}")
+            
             if trade_results and self.notification_manager.should_send_message('entry'):
                 from notifications.message_formatter import MessageFormatter
                 
@@ -268,6 +278,7 @@ class WebhookHandler:
                     total_active = self.trade_manager.get_active_trades_count()
                     
                     try:
+                        # 🆕 استخدام الدالة الأساسية فقط
                         entry_message = MessageFormatter.format_detailed_entry_message(
                             symbol=trade_result['symbol'],
                             signal_type=signal_type,
@@ -286,26 +297,9 @@ class WebhookHandler:
                         logger.debug(f"📤 تم إرسال إشعار دخول للنمط: {trade_result.get('mode_key', 'TRADING_MODE')}")
                     except Exception as e:
                         logger.error(f"⚠️ خطأ في تنسيق رسالة الدخول: {e}")
-                        try:
-                            entry_message = MessageFormatter.format_detailed_entry_message_fixed(
-                                symbol=trade_result['symbol'],
-                                signal_type=signal_type,
-                                direction=trade_result['direction'],
-                                current_trend=current_trend,
-                                strategy_type=trade_result['strategy_type'],
-                                group1_signals=trade_result.get('group1_signals'),
-                                group2_signals=trade_result.get('group2_signals'),
-                                group3_signals=trade_result.get('group3_signals'),
-                                active_for_symbol=active_for_symbol,
-                                total_active=total_active,
-                                config=self.config,
-                                mode_key=trade_result.get('mode_key', 'TRADING_MODE')
-                            )
-                            self.notification_manager.send_notifications(entry_message, 'entry')
-                        except Exception as e2:
-                            logger.error(f"❌ فشل الإرسال بالدالة الإصلاحية: {e2}")
-                            fallback_msg = f"🚀 دخول صفقة: {symbol} - {signal_type} - {trade_result['direction']}"
-                            self.notification_manager.send_notifications(fallback_msg, 'entry')
+                        # 🆕 رسالة بديلة مبسطة
+                        fallback_msg = f"🚀 دخول صفقة: {symbol} - {signal_type} - {trade_result['direction']} - النمط: {trade_result.get('mode_key', 'TRADING_MODE')}"
+                        self.notification_manager.send_notifications(fallback_msg, 'entry')
 
             return jsonify({
                 "status": "entry_processed", 

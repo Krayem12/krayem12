@@ -1,6 +1,6 @@
 # config/validators.py
 class ConfigValidator:
-    """Configuration validation class - UPDATED FOR MULTI-MODE STRATEGY"""
+    """Configuration validation class - UPDATED FOR MULTI-MODE STRATEGY WITH GROUP2_GROUP3"""
     
     @staticmethod
     def validate_config(config):
@@ -28,12 +28,15 @@ class ConfigValidator:
     
     @staticmethod
     def validate_multi_mode_strategy_config(config):
-        """Validate multi-mode strategy configuration"""
+        """Validate multi-mode strategy configuration - UPDATED FOR GROUP2_GROUP3"""
         errors = []
         warnings = []
         
+        # 🆕 تحديث: قائمة أنماط التداول الصالحة لتشمل GROUP2_GROUP3
+        valid_modes = ['GROUP1', 'GROUP1_GROUP2', 'GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3', 
+                      'GROUP2_GROUP3', 'GROUP2', 'GROUP3']  # 🆕 إضافة GROUP2_GROUP3
+        
         # التحقق من TRADING_MODE الأساسي
-        valid_modes = ['GROUP1', 'GROUP1_GROUP2', 'GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3']
         trading_mode = config.get('TRADING_MODE')
         if trading_mode not in valid_modes:
             errors.append(f"❌ TRADING_MODE must be one of {valid_modes}")
@@ -63,6 +66,13 @@ class ConfigValidator:
             if trading_mode1 in ['GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3']:
                 if not config.get('GROUP3_ENABLED'):
                     errors.append("❌ GROUP3 must be enabled for TRADING_MODE1 with GROUP3 requirement")
+            
+            # 🆕 إضافة تحقق لـ GROUP2_GROUP3
+            if trading_mode1 == 'GROUP2_GROUP3':
+                if not config.get('GROUP2_ENABLED'):
+                    errors.append("❌ GROUP2 must be enabled for TRADING_MODE1 with GROUP2_GROUP3 strategy")
+                if not config.get('GROUP3_ENABLED'):
+                    errors.append("❌ GROUP3 must be enabled for TRADING_MODE1 with GROUP2_GROUP3 strategy")
                     
         if config.get('TRADING_MODE2_ENABLED'):
             if trading_mode2 in ['GROUP1_GROUP2', 'GROUP1_GROUP2_GROUP3']:
@@ -72,6 +82,13 @@ class ConfigValidator:
             if trading_mode2 in ['GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3']:
                 if not config.get('GROUP3_ENABLED'):
                     errors.append("❌ GROUP3 must be enabled for TRADING_MODE2 with GROUP3 requirement")
+            
+            # 🆕 إضافة تحقق لـ GROUP2_GROUP3
+            if trading_mode2 == 'GROUP2_GROUP3':
+                if not config.get('GROUP2_ENABLED'):
+                    errors.append("❌ GROUP2 must be enabled for TRADING_MODE2 with GROUP2_GROUP3 strategy")
+                if not config.get('GROUP3_ENABLED'):
+                    errors.append("❌ GROUP3 must be enabled for TRADING_MODE2 with GROUP2_GROUP3 strategy")
                 
         # التحقق من أعداد التأكيدات
         if config.get('REQUIRED_CONFIRMATIONS_GROUP1', 0) <= 0:

@@ -25,7 +25,7 @@ class ConfigManager:
         self.setup_config()
 
     def setup_config(self):
-        """Final configuration setup with SEPARATE GROUP3 LISTS"""
+        """Final configuration setup with VALIDATION"""
         self.config = {
             # Basic Settings
             'DEBUG': os.getenv('DEBUG', 'true').lower() == 'true',
@@ -44,10 +44,10 @@ class ConfigManager:
             'MAX_OPEN_TRADES': self._safe_int_convert('MAX_OPEN_TRADES', 10),
             'MAX_TRADES_PER_SYMBOL': self._safe_int_convert('MAX_TRADES_PER_SYMBOL', 3),
 
-            # 🎯 MULTI-MODE Trading Strategy Settings
-            'TRADING_MODE': os.getenv('TRADING_MODE', 'GROUP1_GROUP2_GROUP3').strip().upper(),
-            'TRADING_MODE1': os.getenv('TRADING_MODE1', 'GROUP1').strip().upper(),
-            'TRADING_MODE2': os.getenv('TRADING_MODE2', 'GROUP1').strip().upper(),
+            # 🎯 MULTI-MODE Trading Strategy Settings - مع التحقق من الصحة
+            'TRADING_MODE': self._validate_trading_mode(os.getenv('TRADING_MODE', 'GROUP1_GROUP2_GROUP3')),
+            'TRADING_MODE1': self._validate_trading_mode(os.getenv('TRADING_MODE1', 'GROUP1')),
+            'TRADING_MODE2': self._validate_trading_mode(os.getenv('TRADING_MODE2', 'GROUP1')),
             'TRADING_MODE1_ENABLED': os.getenv('TRADING_MODE1_ENABLED', 'false').lower() == 'true',
             'TRADING_MODE2_ENABLED': os.getenv('TRADING_MODE2_ENABLED', 'false').lower() == 'true',
 
@@ -113,6 +113,20 @@ class ConfigManager:
 
         self.setup_keywords()
         self.validate_configuration()
+
+    def _validate_trading_mode(self, mode_value):
+        """🆕 التحقق من صحة نمط التداول"""
+        valid_modes = ['GROUP1', 'GROUP1_GROUP2', 'GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3', 
+                      'GROUP2_GROUP3', 'GROUP2', 'GROUP3']
+        
+        mode_clean = mode_value.strip().upper()
+        
+        if mode_clean not in valid_modes:
+            logger.warning(f"⚠️ نمط تداول غير صالح: {mode_value}, استخدام GROUP1 افتراضي")
+            return 'GROUP1'
+        
+        logger.info(f"✅ تم تحميل نمط التداول: {mode_clean}")
+        return mode_clean
 
     def _apply_logging_config_enhanced(self):
         """🛠️ الإصلاح المحسّن النهائي: تطبيق إعدادات التسجيل مع معالجة urllib3"""

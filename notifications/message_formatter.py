@@ -4,9 +4,127 @@
 
 from datetime import datetime
 from typing import Dict, List, Optional
+from collections import Counter  # 🆕 إضافة لعرض الإشارات الفريدة
 
 class MessageFormatter:
-    """فئة متخصصة في تنسيق رسائل النظام - جميع الدوال متاحة الآن"""
+    """فئة متخصصة في تنسيق رسائل النظام - بدون تكرار في الإشارات"""
+
+    @staticmethod
+    def format_detailed_entry_message(symbol, signal_type, direction, current_trend, strategy_type, 
+                                    group1_signals, group2_signals, group3_signals, 
+                                    active_for_symbol, total_active, config, mode_key="TRADING_MODE"):
+        """🎯 تنسيق رسالة دخول مفصلة بدون تكرار في الإشارات"""
+        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+
+        trend_icon = '🟢📈 BULLISH' if str(current_trend).lower() == 'bullish' else '🔴📉 BEARISH'
+
+        align_text = '🟢 مطابق للاتجاه العام' if (
+            (direction == 'buy' and str(current_trend).lower() == 'bullish') or
+            (direction == 'sell' and str(current_trend).lower() == 'bearish')
+        ) else '🔴 غير مطابق'
+
+        # 🎯 تحديد نوع الصفقة
+        trade_types = {
+            'TRADING_MODE': '🟦 أساسي',
+            'TRADING_MODE1': '🟨 نمط 1', 
+            'TRADING_MODE2': '🟪 نمط 2'
+        }
+        trade_type = trade_types.get(mode_key, '🟦 أساسي')
+
+        # 🛠️ الإصلاح: معالجة آمنة لبيانات الإشارات
+        safe_group1 = group1_signals or []
+        safe_group2 = group2_signals or []
+        safe_group3 = group3_signals or []
+
+        # 🆕 الجديد: تصفية الإشارات مع إزالة التكرار وعرض الإشارات الفريدة فقط
+        signals_display = MessageFormatter._filter_and_deduplicate_signals(
+            strategy_type, safe_group1, safe_group2, safe_group3
+        )
+
+        return (
+            "✦✦✦ 🚀 دخـــــول صفـــــقة ✦✦✦\n"
+            "┏━━━━━━━━━━━━━━━━━━━━\n"
+            f"┃ 💰 الرمز: {symbol}\n"
+            f"┃ 🎯 نوع الصفقة: {trade_type}\n"
+            f"┃ 🎯 نوع العملية: {'🟢 شراء' if direction=='buy' else '🔴 بيع'}\n"
+            f"┃ 📊 اتجاه الرمز: {trend_icon}\n"
+            f"┃ 🎯 محاذاة الاتجاه: {align_text}\n"
+            f"┃ 🎯 الاستراتيجية: {strategy_type}\n"
+            f"┃ 📋 الإشارة الرئيسية: {signal_type}\n"
+            f"{signals_display}\n"
+            f"┃ 📊 صفقات {symbol}: {active_for_symbol}/{config['MAX_TRADES_PER_SYMBOL']}\n"
+            f"┃ 📊 الصفقات الإجمالية: {total_active}/{config['MAX_OPEN_TRADES']}\n"
+            "┗━━━━━━━━━━━━━━━━━━━━\n"
+            f"🕐 {timestamp}"
+        )
+
+    @staticmethod
+    def _filter_and_deduplicate_signals(strategy_type, group1_signals, group2_signals, group3_signals):
+        """🎯 دالة جديدة: تصفية الإشارات مع إزالة التكرار وعرض الإشارات الفريدة فقط"""
+        
+        # نسخ القوائم لتجنب التعديل على الأصل
+        filtered_group1 = list(group1_signals) if group1_signals else []
+        filtered_group2 = list(group2_signals) if group2_signals else []
+        filtered_group3 = list(group3_signals) if group3_signals else []
+        
+        # 🎯 تطبيق التصفية الصارمة حسب الاستراتيجية
+        if strategy_type == 'GROUP1':
+            filtered_group2 = []
+            filtered_group3 = []
+        elif strategy_type == 'GROUP1_GROUP2':
+            filtered_group3 = []
+        elif strategy_type == 'GROUP1_GROUP3':
+            filtered_group2 = []
+        # GROUP1_GROUP2_GROUP3 تظهر جميع الإشارات
+        
+        # 🆕 الجديد: إزالة التكرار وعرض الإشارات الفريدة فقط مع الحفاظ على العدد الأصلي
+        display = ""
+        
+        # معالجة المجموعة الأولى - إزالة التكرار
+        if filtered_group1:
+            # حساب التكرارات
+            group1_counter = Counter(filtered_group1)
+            total_group1 = len(filtered_group1)
+            unique_group1 = len(group1_counter)
+            
+            numbered_group1 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group1_counter.keys())]
+            display += f"┃ 🔴 إشارات المجموعة الأولى ({total_group1} إشارة, {unique_group1} فريدة):\n" + "\n".join(numbered_group1)
+        
+        # معالجة المجموعة الثانية - إزالة التكرار
+        if filtered_group2:
+            if display:  # إضافة سطر فاصل إذا كان هناك إشارات سابقة
+                display += "\n"
+            
+            group2_counter = Counter(filtered_group2)
+            total_group2 = len(filtered_group2)
+            unique_group2 = len(group2_counter)
+            
+            numbered_group2 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group2_counter.keys())]
+            display += f"┃ 🔵 إشارات المجموعة الثانية ({total_group2} إشارة, {unique_group2} فريدة):\n" + "\n".join(numbered_group2)
+        
+        # معالجة المجموعة الثالثة - إزالة التكرار
+        if filtered_group3:
+            if display:  # إضافة سطر فاصل إذا كان هناك إشارات سابقة
+                display += "\n"
+            
+            group3_counter = Counter(filtered_group3)
+            total_group3 = len(filtered_group3)
+            unique_group3 = len(group3_counter)
+            
+            numbered_group3 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(group3_counter.keys())]
+            display += f"┃ 🟢 إشارات المجموعة الثالثة ({total_group3} إشارة, {unique_group3} فريدة):\n" + "\n".join(numbered_group3)
+        
+        # إذا لم توجد أي إشارات بعد التصفية
+        if not display:
+            display = "┃   ⚠️ لا توجد إشارات مسجلة"
+        
+        return display
+
+    @staticmethod
+    def _filter_signals_by_strategy_strict(strategy_type, group1_signals, group2_signals, group3_signals):
+        """🎯 دالة مساعدة: تصفية صارمة للإشارات حسب الاستراتيجية (للتوافق)"""
+        # استدعاء الدالة الجديدة للحفاظ على التوافق
+        return MessageFormatter._filter_and_deduplicate_signals(strategy_type, group1_signals, group2_signals, group3_signals)
 
     @staticmethod
     def format_trend_message(signal_data, new_trend, old_trend):
@@ -112,105 +230,6 @@ class MessageFormatter:
         )
 
     @staticmethod
-    def format_detailed_entry_message(symbol, signal_type, direction, current_trend, strategy_type, 
-                                    group1_signals, group2_signals, group3_signals, 
-                                    active_for_symbol, total_active, config, mode_key="TRADING_MODE"):
-        """🎯 Format detailed entry message with STRICT FILTERED signals based on strategy"""
-        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
-
-        trend_icon = '🟢📈 BULLISH' if current_trend.lower() == 'bullish' else '🔴📉 BEARISH'
-
-        align_text = '🟢 مطابق للاتجاه العام' if (
-            (direction == 'buy' and current_trend.lower() == 'bullish') or
-            (direction == 'sell' and current_trend.lower() == 'bearish')
-        ) else '🔴 غير مطابق'
-
-        # 🎯 تحديد نوع الصفقة
-        trade_types = {
-            'TRADING_MODE': '🟦 أساسي',
-            'TRADING_MODE1': '🟨 نمط 1', 
-            'TRADING_MODE2': '🟪 نمط 2'
-        }
-        trade_type = trade_types.get(mode_key, '🟦 أساسي')
-
-        # 🛠️ الإصلاح: معالجة آمنة لبيانات group3_signals
-        safe_group1 = group1_signals if group1_signals is not None else []
-        safe_group2 = group2_signals if group2_signals is not None else []
-        safe_group3 = group3_signals if group3_signals is not None else []
-
-        # 🎯 الجديد: تصفية الإشارات الصارمة حسب الاستراتيجية الفعلية
-        signals_display = MessageFormatter._filter_signals_by_strategy_strict(
-            strategy_type, safe_group1, safe_group2, safe_group3
-        )
-
-        return (
-            "✦✦✦ 🚀 دخـــــول صفـــــقة ✦✦✦\n"
-            "┏━━━━━━━━━━━━━━━━━━━━\n"
-            f"┃ 💰 الرمز: {symbol}\n"
-            f"┃ 🎯 نوع الصفقة: {trade_type}\n"
-            f"┃ 🎯 نوع العملية: {'🟢 شراء' if direction=='buy' else '🔴 بيع'}\n"
-            f"┃ 📊 اتجاه الرمز: {trend_icon}\n"
-            f"┃ 🎯 محاذاة الاتجاه: {align_text}\n"
-            f"┃ 🎯 الاستراتيجية: {strategy_type}\n"
-            f"┃ 📋 الإشارة الرئيسية: {signal_type}\n"
-            f"{signals_display}\n"
-            f"┃ 📊 صفقات {symbol}: {active_for_symbol}/{config['MAX_TRADES_PER_SYMBOL']}\n"
-            f"┃ 📊 الصفقات الإجمالية: {total_active}/{config['MAX_OPEN_TRADES']}\n"
-            "┗━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕐 {timestamp}"
-        )
-
-    @staticmethod
-    def _filter_signals_by_strategy_strict(strategy_type, group1_signals, group2_signals, group3_signals):
-        """🎯 دالة جديدة: تصفية صارمة للإشارات حسب الاستراتيجية الفعلية"""
-        
-        # نسخ القوائم لتجنب التعديل على الأصل
-        filtered_group1 = group1_signals.copy() if group1_signals else []
-        filtered_group2 = group2_signals.copy() if group2_signals else []
-        filtered_group3 = group3_signals.copy() if group3_signals else []
-        
-        # 🎯 تطبيق التصفية الصارمة حسب الاستراتيجية
-        if strategy_type == 'GROUP1':
-            # GROUP1 فقط - إخفاء GROUP2 و GROUP3
-            filtered_group2 = []
-            filtered_group3 = []
-        elif strategy_type == 'GROUP1_GROUP2':
-            # GROUP1 و GROUP2 فقط - إخفاء GROUP3
-            filtered_group3 = []
-        elif strategy_type == 'GROUP1_GROUP3':
-            # GROUP1 و GROUP3 فقط - إخفاء GROUP2
-            filtered_group2 = []
-        # GROUP1_GROUP2_GROUP3 تظهر جميع الإشارات
-        
-        # بناء العرض مع الإشارات المصفاة فقط
-        display = ""
-        
-        # عرض إشارات المجموعة الأولى إذا كانت موجودة ومطلوبة
-        if filtered_group1:
-            numbered_group1 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(filtered_group1)]
-            display += f"┃ 🔴 إشارات المجموعة الأولى ({len(filtered_group1)}):\n" + "\n".join(numbered_group1)
-        
-        # عرض إشارات المجموعة الثانية إذا كانت موجودة ومطلوبة
-        if filtered_group2:
-            if display:  # إضافة سطر فاصل إذا كان هناك إشارات سابقة
-                display += "\n"
-            numbered_group2 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(filtered_group2)]
-            display += f"┃ 🔵 إشارات المجموعة الثانية ({len(filtered_group2)}):\n" + "\n".join(numbered_group2)
-        
-        # عرض إشارات المجموعة الثالثة إذا كانت موجودة ومطلوبة
-        if filtered_group3:
-            if display:  # إضافة سطر فاصل إذا كان هناك إشارات سابقة
-                display += "\n"
-            numbered_group3 = [f"┃   {i+1}. {signal}" for i, signal in enumerate(filtered_group3)]
-            display += f"┃ 🟢 إشارات المجموعة الثالثة ({len(filtered_group3)}):\n" + "\n".join(numbered_group3)
-        
-        # إذا لم توجد أي إشارات بعد التصفية
-        if not display:
-            display = "┃   ⚠️ لا توجد إشارات مسجلة"
-        
-        return display
-
-    @staticmethod
     def format_exit_message(symbol, signal_type, active_for_symbol, total_active, config):
         """Format exit message"""
         timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
@@ -254,11 +273,11 @@ class MessageFormatter:
         """🎯 إصدار معدل - معالجة آمنة لبيانات group3_signals"""
         timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
 
-        trend_icon = '🟢📈 BULLISH' if current_trend.lower() == 'bullish' else '🔴📉 BEARISH'
+        trend_icon = '🟢📈 BULLISH' if str(current_trend).lower() == 'bullish' else '🔴📉 BEARISH'
 
         align_text = '🟢 مطابق للاتجاه العام' if (
-            (direction == 'buy' and current_trend.lower() == 'bullish') or
-            (direction == 'sell' and current_trend.lower() == 'bearish')
+            (direction == 'buy' and str(current_trend).lower() == 'bullish') or
+            (direction == 'sell' and str(current_trend).lower() == 'bearish')
         ) else '🔴 غير مطابق'
 
         # 🎯 تحديد نوع الصفقة
@@ -275,7 +294,7 @@ class MessageFormatter:
         safe_group3 = group3_signals if group3_signals is not None else []
 
         # 🎯 تصفية الإشارات الصارمة حسب الاستراتيجية الفعلية
-        signals_display = MessageFormatter._filter_signals_by_strategy_strict(
+        signals_display = MessageFormatter._filter_and_deduplicate_signals(
             strategy_type, safe_group1, safe_group2, safe_group3
         )
 

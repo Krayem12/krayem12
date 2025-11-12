@@ -1,6 +1,7 @@
 # notifications/notification_manager.py
 import requests
 import logging
+from notifications.message_formatter import MessageFormatter  # إضافة الاستيراد المفقود
 
 logger = logging.getLogger(__name__)
 

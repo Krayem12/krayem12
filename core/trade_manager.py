@@ -2,42 +2,25 @@
 import logging
 from datetime import datetime
 from typing import Dict, List
+import threading  # 🆕 إضافة للتعامل مع التزامن
 
 logger = logging.getLogger(__name__)
 
 class TradeManager:
     def __init__(self, config):
         self.config = config
+        self.trade_lock = threading.Lock()  # 🆕 قفل لإدارة التزامن
         
         # ✅ قائمة الصفقات النشطة
         self.active_trades = {}
-
-        # ✅ الاتجاه الحالي لكل رمز
         self.current_trend = {}
-
-        # ✅ الاتجاه السابق لكل رمز (للعرض فقط)
         self.previous_trend = {}
-
-        # ✅ آخر اتجاه تم الإبلاغ عنه لكل رمز
         self.last_reported_trend = {}
-
-        # 🆕 إضافة عداد منفصل لكل رمز
         self.symbol_trade_count = {}
-        self.total_trade_counter = 0  # عداد إجمالي
-
-        # ✅ عداد أو مقاييس تشغيل النظام إن وجدت
-        self.metrics = {
-            "trades_opened": 0,
-            "trades_closed": 0
-        }
-
-        # 🆕 مرجع إلى GroupManager (سيتم تعيينه لاحقاً)
+        self.total_trade_counter = 0
+        self.metrics = {"trades_opened": 0, "trades_closed": 0}
         self.group_manager = None
-
-        # 🆕 مرجع إلى NotificationManager (سيتم تعيينه لاحقاً)
         self.notification_manager = None
-
-        # 🛠️ الإصلاح: خاصية جديدة لمنع الإشعارات المكررة
         self._last_trend_notification = {}
 
     def set_group_manager(self, group_manager):
@@ -165,43 +148,52 @@ class TradeManager:
             self.close_trade(trade_id)
 
     def open_trade(self, symbol, direction, strategy_type="GROUP1", mode_key="TRADING_MODE"):
-        """فتح صفقة جديدة مع إضافة نوع الاستراتيجية والنمط"""
-        # التحقق من الحد الأقصى للصفقات الإجمالي
-        if len(self.active_trades) >= self.config['MAX_OPEN_TRADES']:
-            logger.warning(f"❌ تجاوز الحد الأقصى للصفقات المفتوحة: {self.config['MAX_OPEN_TRADES']}")
-            return False
+        """فتح صفقة جديدة مع التحقق من الاستراتيجية"""
+        # 🔒 استخدام القفل لمنع التزامن
+        with self.trade_lock:
+            # 🎯 التحقق من أن الاستراتيجية مطابقة للإعدادات
+            expected_strategy = self.config.get(mode_key, 'GROUP1')
+            if strategy_type != expected_strategy:
+                logger.warning(f"⚠️ تناقض في الاستراتيجية: {strategy_type} vs {expected_strategy} للنمط {mode_key}")
+                # 🆕 استخدام الاستراتيجية المتوقعة بدلاً من المستلمة
+                strategy_type = expected_strategy
+            
+            # التحقق من الحد الأقصى للصفقات الإجمالي
+            if len(self.active_trades) >= self.config['MAX_OPEN_TRADES']:
+                logger.warning(f"❌ تجاوز الحد الأقصى للصفقات المفتوحة: {self.config['MAX_OPEN_TRADES']}")
+                return False
 
-        # 🆕 تهيئة عداد الرمز إذا لم يكن موجوداً
-        if symbol not in self.symbol_trade_count:
-            self.symbol_trade_count[symbol] = 0
+            # 🆕 تهيئة عداد الرمز إذا لم يكن موجوداً
+            if symbol not in self.symbol_trade_count:
+                self.symbol_trade_count[symbol] = 0
 
-        # التحقق من الحد الأقصى للصفقات لكل رمز
-        if self.symbol_trade_count[symbol] >= self.config['MAX_TRADES_PER_SYMBOL']:
-            logger.warning(f"❌ تجاوز الحد الأقصى لصفقات الرمز {symbol}: {self.config['MAX_TRADES_PER_SYMBOL']}")
-            return False
+            # التحقق من الحد الأقصى للصفقات لكل رمز
+            if self.symbol_trade_count[symbol] >= self.config['MAX_TRADES_PER_SYMBOL']:
+                logger.warning(f"❌ تجاوز الحد الأقصى لصفقات الرمز {symbol}: {self.config['MAX_TRADES_PER_SYMBOL']}")
+                return False
 
-        # 🆕 إصلاح إنشاء معرف الصفقة
-        self.total_trade_counter += 1
-        trade_id = f"{symbol}_{mode_key}_{self.total_trade_counter}"
-        
-        self.active_trades[trade_id] = {
-            "symbol": symbol, 
-            "side": direction,
-            "strategy_type": strategy_type,
-            "mode_key": mode_key,
-            "trade_type": self._get_trade_type(mode_key),
-            "opened_at": self._get_current_timestamp()
-        }
-        
-        # 🆕 تحديث العداد بشكل صحيح
-        self.symbol_trade_count[symbol] += 1
-        self.metrics["trades_opened"] += 1
-        
-        logger.debug(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type} | الاتجاه: {direction.upper()}")
-        logger.debug(f"📊 صفقات {symbol}: {self.symbol_trade_count[symbol]}/{self.config['MAX_TRADES_PER_SYMBOL']}")
-        logger.debug(f"📊 الصفقات الإجمالية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
-        
-        return True
+            # 🆕 إصلاح إنشاء معرف الصفقة
+            self.total_trade_counter += 1
+            trade_id = f"{symbol}_{mode_key}_{self.total_trade_counter}"
+            
+            self.active_trades[trade_id] = {
+                "symbol": symbol, 
+                "side": direction,
+                "strategy_type": strategy_type,
+                "mode_key": mode_key,
+                "trade_type": self._get_trade_type(mode_key),
+                "opened_at": self._get_current_timestamp()
+            }
+            
+            # 🆕 تحديث العداد بشكل صحيح
+            self.symbol_trade_count[symbol] += 1
+            self.metrics["trades_opened"] += 1
+            
+            logger.debug(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type} | الاتجاه: {direction.upper()}")
+            logger.debug(f"📊 صفقات {symbol}: {self.symbol_trade_count[symbol]}/{self.config['MAX_TRADES_PER_SYMBOL']}")
+            logger.debug(f"📊 الصفقات الإجمالية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
+            
+            return True
 
     def _get_trade_type(self, mode_key):
         """تحديد نوع الصفقة بناءً على المفتاح"""
@@ -214,29 +206,31 @@ class TradeManager:
 
     def close_trade(self, trade_id):
         """إغلاق صفقة مع تحديث العداد بشكل آمن"""
-        if trade_id in self.active_trades:
-            symbol = self.active_trades[trade_id]["symbol"]
-            mode_key = self.active_trades[trade_id].get("mode_key", "TRADING_MODE")
-            strategy_type = self.active_trades[trade_id].get("strategy_type", "GROUP1")
-            
-            logger.debug(f"✅ تم إغلاق الصفقة: {trade_id} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
-            
-            # 🆕 تحديث العداد بشكل آمن
-            if symbol in self.symbol_trade_count and self.symbol_trade_count[symbol] > 0:
-                self.symbol_trade_count[symbol] -= 1
+        # 🔒 استخدام القفل لمنع التزامن
+        with self.trade_lock:
+            if trade_id in self.active_trades:
+                symbol = self.active_trades[trade_id]["symbol"]
+                mode_key = self.active_trades[trade_id].get("mode_key", "TRADING_MODE")
+                strategy_type = self.active_trades[trade_id].get("strategy_type", "GROUP1")
+                
+                logger.debug(f"✅ تم إغلاق الصفقة: {trade_id} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
+                
+                # 🆕 تحديث العداد بشكل آمن
+                if symbol in self.symbol_trade_count and self.symbol_trade_count[symbol] > 0:
+                    self.symbol_trade_count[symbol] -= 1
+                else:
+                    # إذا كان العداد غير موجود أو صفر، نعيد تهيئته
+                    self.symbol_trade_count[symbol] = 0
+                
+                del self.active_trades[trade_id]
+                self.metrics["trades_closed"] += 1
+                
+                logger.debug(f"📊 صفقات {symbol} المتبقية: {self.symbol_trade_count.get(symbol, 0)}/{self.config['MAX_TRADES_PER_SYMBOL']}")
+                logger.debug(f"📊 الصفقات الإجمالية المتبقية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
+                return True
             else:
-                # إذا كان العداد غير موجود أو صفر، نعيد تهيئته
-                self.symbol_trade_count[symbol] = 0
-            
-            del self.active_trades[trade_id]
-            self.metrics["trades_closed"] += 1
-            
-            logger.debug(f"📊 صفقات {symbol} المتبقية: {self.symbol_trade_count.get(symbol, 0)}/{self.config['MAX_TRADES_PER_SYMBOL']}")
-            logger.debug(f"📊 الصفقات الإجمالية المتبقية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
-            return True
-        else:
-            logger.warning(f"⚠️ الصفقة غير موجودة: {trade_id}")
-            return False
+                logger.warning(f"⚠️ الصفقة غير موجودة: {trade_id}")
+                return False
 
     def handle_exit_signal(self, symbol, signal_type):
         """معالجة إشارات الخروج"""

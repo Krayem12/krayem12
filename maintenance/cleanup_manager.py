@@ -10,7 +10,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class CleanupManager:
-    """إدارة عمليات التنظيف والجدولة"""
+    """إدارة عمليات التنظيف والجدولة - الإصدار المحسن"""
 
     def __init__(self, config, trade_manager, group_manager, notification_manager):
         self.config = config
@@ -144,11 +144,11 @@ class CleanupManager:
         logger.info("🔄 All system data has been reset for the new day")
 
     def backup_system_state(self):
-        """Enhanced backup system with ULTIMATE permission handling"""
+        """نظام نسخ احتياطي محسن مع حفظ فعلي"""
         backup_success = False
         
         try:
-            logger.info("💾 Starting system backup...")
+            logger.info("💾 بدء النسخ الاحتياطي للنظام...")
             backup_data = {
                 "timestamp": datetime.now().isoformat(),
                 "pending_signals": self._safe_pending_signals_snapshot(),
@@ -156,25 +156,38 @@ class CleanupManager:
                 "current_trend": self.trade_manager.current_trend.copy(),
                 "previous_trend": self.trade_manager.previous_trend.copy(),
                 "last_reported_trend": self.trade_manager.last_reported_trend.copy(),
-                "backup_version": "v4_modular_group3_fixed"
+                "backup_version": "v5_stable_fixed"
             }
 
             # إضافة عداد الصفقات إذا كان موجوداً
             if hasattr(self.trade_manager, 'symbol_trade_count'):
                 backup_data["symbol_trade_count"] = self.trade_manager.symbol_trade_count.copy()
 
-            # 🆕 الحل النهائي: استخدام الذاكرة فقط (لا حفظ في ملف)
-            backup_json = json.dumps(backup_data, indent=2, ensure_ascii=False)
-            backup_size = len(backup_json.encode('utf-8'))
-            
-            logger.info(f"✅ Backup created in memory: {backup_size} bytes")
-            logger.info("💡 Note: Backup stored in memory only due to file permission issues")
-            
-            # 🆕 يمكن إضافة حفظ في قاعدة بيانات أو خدمة سحابية هنا لاحقاً
-            backup_success = True
+            # 🆕 محاولة الحفظ في ملف مع التعامل مع الأخطاء
+            try:
+                backup_dir = "system_backups"
+                os.makedirs(backup_dir, exist_ok=True)
+                
+                backup_file = os.path.join(backup_dir, f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+                
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(backup_data, f, indent=2, ensure_ascii=False, default=str)
+                
+                backup_size = os.path.getsize(backup_file)
+                logger.info(f"✅ تم حفظ النسخ الاحتياطي في الملف: {backup_file} ({backup_size} bytes)")
+                backup_success = True
+                
+            except Exception as file_error:
+                logger.warning(f"⚠️ فشل حفظ النسخ في ملف، استخدام الذاكرة فقط: {file_error}")
+                # 🆕 النسخ في الذاكرة كبديل
+                backup_json = json.dumps(backup_data, indent=2, ensure_ascii=False, default=str)
+                backup_size = len(backup_json.encode('utf-8'))
+                logger.info(f"✅ تم إنشاء نسخ احتياطي في الذاكرة: {backup_size} bytes")
+                backup_success = True
 
         except Exception as e:
-            logger.error(f"❌ Backup Failed: {e}")
+            logger.error(f"❌ فشل النسخ الاحتياطي: {e}")
+            backup_success = False
         
         return backup_success
 

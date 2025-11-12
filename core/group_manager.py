@@ -3,11 +3,12 @@ import logging
 from datetime import datetime, timedelta
 import hashlib
 from typing import Dict, List, Optional, Tuple
+import threading  # 🆕 إضافة للتعامل مع التزامن
 
 logger = logging.getLogger(__name__)
 
 class GroupManager:
-    """🎯 نظام إدارة المجموعات مع تخزين الإشارات المخالفة"""
+    """🎯 نظام إدارة المجموعات مع تطبيق صحيح للاستراتيجيات"""
 
     def __init__(self, config, trade_manager):
         self.config = config
@@ -20,7 +21,10 @@ class GroupManager:
         self.error_log = []
         self.mode_performance = {}
         
-        logger.info("🎯 نظام المجموعات مع تخزين الإشارات المخالفة جاهز")
+        # 🆕 قفل لإدارة التزامن
+        self.signal_lock = threading.Lock()
+        
+        logger.info("🎯 نظام المجموعات مع تطبيق صحيح للاستراتيجيات جاهز")
 
     def _determine_group3_direction_strict(self, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
         """🎯 تحديد اتجاه GROUP3 بالتطابق التام 100% مع القوائم المنفصلة - إصلاح التحذير"""
@@ -71,7 +75,7 @@ class GroupManager:
             return None, None
 
     def route_signal(self, symbol: str, signal_data: Dict, classification: str) -> List[Dict]:
-        """🎯 توجيه الإشارة للمجموعة المناسبة مع تخزين الإشارات المخالفة"""
+        """🎯 توجيه الإشارة للمجموعة المناسبة مع تطبيق الاستراتيجية الصحيحة"""
         logger.debug("=" * 50)
         logger.debug(f"🔄 بدء توجيه الإشارة: {symbol} | {signal_data['signal_type']} | {classification}")
         logger.debug("=" * 50)
@@ -101,30 +105,32 @@ class GroupManager:
                 logger.debug("🔁 إشارة مكررة - تم تجاهلها")
                 return []
 
-            # ➕ إضافة الإشارة للمجموعة (دائماً نخزنها أولاً)
-            logger.debug(f"📥 إضافة الإشارة إلى المجموعة: {group_type}")
-            self._add_signal_to_group(symbol, signal_data, group_type, direction, classification)
+            # 🔒 استخدام القفل لمنع التزامن
+            with self.signal_lock:
+                # ➕ إضافة الإشارة للمجموعة (دائماً نخزنها أولاً)
+                logger.debug(f"📥 إضافة الإشارة إلى المجموعة: {group_type}")
+                self._add_signal_to_group(symbol, signal_data, group_type, direction, classification)
 
-            # 🔒 التحقق من محاذاة الاتجاه
-            logger.debug("🔍 التحقق من محاذاة الاتجاه...")
-            if not self._check_trend_alignment(symbol, direction):
-                # 🛠️ الخيار الثالث: التحكم في تخزين الإشارات المخالفة
-                store_contrarian = self.config.get('STORE_CONTRARIAN_SIGNALS', False)
-                if store_contrarian:
-                    logger.debug(f"📦 الإشارة مخالفة للاتجاه - تم تخزينها للاستخدام المستقبلي: {symbol} -> {direction}")
-                else:
-                    # إزالة الإشارة المخالفة إذا كان الخيار معطلاً
-                    logger.debug(f"🚫 الإشارة مخالفة للاتجاه - تم حذفها: {symbol} -> {direction}")
-                    self._remove_contrarian_signal(symbol, group_type, signal_data)
-                return []  # لا تفتح صفقات الآن
+                # 🔍 التحقق من محاذاة الاتجاه
+                logger.debug("🔍 التحقق من محاذاة الاتجاه...")
+                if not self._check_trend_alignment(symbol, direction):
+                    # 🛠️ الخيار الثالث: التحكم في تخزين الإشارات المخالفة
+                    store_contrarian = self.config.get('STORE_CONTRARIAN_SIGNALS', False)
+                    if store_contrarian:
+                        logger.debug(f"📦 الإشارة مخالفة للاتجاه - تم تخزينها للاستخدام المستقبلي: {symbol} -> {direction}")
+                    else:
+                        # إزالة الإشارة المخالفة إذا كان الخيار معطلاً
+                        logger.debug(f"🚫 الإشارة مخالفة للاتجاه - تم حذفها: {symbol} -> {direction}")
+                        self._remove_contrarian_signal(symbol, group_type, signal_data)
+                    return []  # لا تفتح صفقات الآن
 
-            # 📊 تقييم شروط الدخول
-            logger.debug("📊 تقييم شروط الدخول...")
-            trade_results = self._evaluate_entry_conditions(symbol, direction)
-            
-            logger.debug(f"📈 نتيجة تقييم الشروط: {len(trade_results)} صفقة محتملة")
-            
-            return trade_results
+                # 📊 تقييم شروط الدخول
+                logger.debug("📊 تقييم شروط الدخول...")
+                trade_results = self._evaluate_entry_conditions(symbol, direction)
+                
+                logger.debug(f"📈 نتيجة تقييم الشروط: {len(trade_results)} صفقة محتملة")
+                
+                return trade_results
 
         except Exception as e:
             error_msg = f"💥 خطأ في توجيه الإشارة: {symbol} | {str(e)}"
@@ -382,21 +388,21 @@ class GroupManager:
         return active_modes
 
     def _evaluate_single_mode(self, mode_key: str, symbol: str, direction: str, signal_counts: Dict) -> Optional[Dict]:
-        """🎯 تقييم نمط تداول فردي"""
+        """🎯 تقييم نمط تداول فردي - الإصدار المصحح"""
         try:
             # 📊 التحقق من حدود الصفقات أولاً
             if not self._can_open_trade(symbol, mode_key):
                 return None
             
-            # 🎯 الحصول على إعدادات النمط
-            trading_mode = self.config[mode_key]
+            # 🎯 الحصول على إعدادات النمط - التصحيح هنا
+            trading_mode = self.config.get(mode_key, 'GROUP1')  # 🆕 استخدام get مع قيمة افتراضية
             logger.debug(f"🔍 فحص النمط {mode_key}: {trading_mode}")
             
             # ✅ التحقق من شروط الدخول حسب الاستراتيجية
             conditions_met, required_groups = self._check_strategy_conditions(trading_mode, signal_counts)
             
             if conditions_met:
-                logger.debug(f"🎯 شروط الدخول متحققة لـ {symbol} بالنمط {mode_key}")
+                logger.debug(f"🎯 شروط الدخول متحققة لـ {symbol} بالنمط {mode_key} - الاستراتيجية: {trading_mode}")
                 
                 # 💼 فتح الصفقة
                 if self._open_trade(symbol, direction, trading_mode, mode_key):
@@ -405,7 +411,7 @@ class GroupManager:
                     trade_info.update({
                         'symbol': symbol,
                         'direction': direction,
-                        'strategy_type': trading_mode,
+                        'strategy_type': trading_mode,  # 🆕 استخدام الاستراتيجية الفعلية
                         'mode_key': mode_key
                     })
                     return trade_info
@@ -448,7 +454,7 @@ class GroupManager:
         return True
 
     def _check_strategy_conditions(self, trading_mode: str, signal_counts: Dict) -> Tuple[bool, List[str]]:
-        """✅ التحقق من شروط الاستراتيجية"""
+        """✅ التحقق من شروط الاستراتيجية - مضاف GROUP2_GROUP3"""
         required_groups = ['GROUP1']  # GROUP1 مطلوب دائماً
         
         if trading_mode == 'GROUP1':
@@ -472,6 +478,15 @@ class GroupManager:
             group3_ok = self.config.get('GROUP3_ENABLED', False) and \
                        signal_counts['g3'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP3"]
             required_groups.extend(['GROUP2', 'GROUP3'])
+            return group2_ok and group3_ok, required_groups
+
+        elif trading_mode == 'GROUP2_GROUP3':
+            # 🆕 إضافة دعم لاستراتيجية GROUP2_GROUP3
+            group2_ok = self.config.get('GROUP2_ENABLED', False) and \
+                       signal_counts['g2'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP2"]
+            group3_ok = self.config.get('GROUP3_ENABLED', False) and \
+                       signal_counts['g3'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP3"]
+            required_groups = ['GROUP2', 'GROUP3']  # 🆕 GROUP1 غير مطلوب في هذه الاستراتيجية
             return group2_ok and group3_ok, required_groups
             
         else:
