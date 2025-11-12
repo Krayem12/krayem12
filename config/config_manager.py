@@ -112,7 +112,7 @@ class ConfigManager:
         self.validate_configuration()
 
     def _apply_logging_config_enhanced(self):
-        """🛠️ الإصلاح المحسّن: تطبيق إعدادات التسجيل بشكل أكثر فعالية"""
+        """🛠️ الإصلاح المحسّن النهائي: تطبيق إعدادات التسجيل مع معالجة urllib3"""
         try:
             log_level = self.config['LOG_LEVEL']
             debug_mode = self.config['DEBUG']
@@ -165,14 +165,37 @@ class ConfigManager:
                 for handler in logger_instance.handlers[:]:
                     logger_instance.removeHandler(handler)
             
+            # 🛠️ الإصلاح النهائي: معالجة مشكلة urllib3 بشكل خاص
+            urllib3_logger = logging.getLogger('urllib3.connectionpool')
+            urllib3_logger.setLevel(logging.INFO)  # تقليل الضوضاء من DEBUG إلى INFO
+            urllib3_logger.propagate = True
+            
+            # 🛠️ معالجة جميع لوغرات urllib3 ذات الصلة
+            urllib3_related_loggers = [
+                'urllib3',
+                'urllib3.connectionpool',
+                'urllib3.response',
+                'urllib3.connection'
+            ]
+            
+            for urllib_logger in urllib3_related_loggers:
+                logger_instance = logging.getLogger(urllib_logger)
+                logger_instance.setLevel(logging.INFO)
+                # التأكد من أن الرسائل تظهر مع التنسيق الصحيح
+                for handler in logger_instance.handlers[:]:
+                    logger_instance.removeHandler(handler)
+            
             # 🛠️ إخفاء رسائل المكتبات الخارجية إذا كان DEBUG=false
             if not debug_mode:
-                external_loggers = ['werkzeug', 'schedule', 'urllib3', 'requests']
+                external_loggers = ['werkzeug', 'schedule', 'urllib3', 'requests', 'urllib3.connectionpool']
                 for ext_logger in external_loggers:
                     logging.getLogger(ext_logger).setLevel(logging.WARNING)
             else:
                 # في وضع التصحيح، نسمح ببعض رسائل المكتبات
                 logging.getLogger('werkzeug').setLevel(logging.INFO)
+                # 🛠️ تقليل ضوضاء urllib3 حتى في وضع DEBUG
+                for urllib_logger in urllib3_related_loggers:
+                    logging.getLogger(urllib_logger).setLevel(logging.INFO)
             
             # 🎯 رسالة تأكيد على مستوى INFO حتى نراها دائماً
             logging.info(f"✅ تم تطبيق إعدادات التسجيل: DEBUG={debug_mode}, LOG_LEVEL={log_level}")
@@ -181,6 +204,12 @@ class ConfigManager:
             # 🆕 اختبار مباشر للوقو
             logging.debug("🔍 اختبار رسالة DEBUG - يجب أن تظهر إذا كان DEBUG=true")
             logging.info("ℹ️ اختبار رسالة INFO - يجب أن تظهر دائماً")
+            
+            # 🛠️ اختبار إضافي للتأكد من إعدادات urllib3
+            urllib3_test_logger = logging.getLogger('urllib3.connectionpool')
+            current_level = urllib3_test_logger.getEffectiveLevel()
+            level_name = logging.getLevelName(current_level)
+            print(f"🔧 مستوى تسجيل urllib3.connectionpool: {level_name}")
             
         except Exception as e:
             print(f"❌ خطأ في تطبيق إعدادات التسجيل: {e}")

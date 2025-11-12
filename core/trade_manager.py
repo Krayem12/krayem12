@@ -69,14 +69,14 @@ class TradeManager:
         # إغلاق الصفقات المخالفة للاتجاه الجديد
         self.close_contrarian_trades(symbol, classification)
         
-        # 🆕 إرسال إشعار بسيط عن تغيير الاتجاه
-        if should_report and self.notification_manager:
-            self._send_simple_trend_notification(symbol, direction, old_trend, signal_data)
+        # 🛠️ الإصلاح: إزالة الإرسال المزدوج - يتم الإرسال من webhook_handler فقط
+        # if should_report and self.notification_manager:
+        #     self._send_simple_trend_notification(symbol, direction, old_trend, signal_data)
         
         return should_report, old_trend
 
     def _send_simple_trend_notification(self, symbol: str, new_trend: str, old_trend: str, signal_data: Dict):
-        """🆕 إرسال إشعار بسيط عن تغيير الاتجاه"""
+        """🆕 إرسال إشعار بسيط عن تغيير الاتجاه - محجوب الآن"""
         try:
             from notifications.message_formatter import MessageFormatter
             
@@ -263,10 +263,3 @@ class TradeManager:
             # 🆕 استخدام العداد المخصص للرمز
             return self.symbol_trade_count.get(symbol, 0)
         return len(self.active_trades)
-
-    # 🚫 تم حذف الدوال التالية تماماً:
-    # - _clean_contrarian_signals
-    # - _clean_contrarian_signals_basic
-    # - _send_detailed_trend_notification
-    # - _get_remaining_signals
-    # - _get_group_display_name
