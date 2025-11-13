@@ -3,243 +3,186 @@ import re
 import hashlib
 import logging
 from datetime import datetime
+from typing import Dict, Optional, Tuple, List
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
 class SignalProcessor:
-    """Process and classify trading signals with 100% STRICT EXACT MATCH only"""
+    """🎯 معالج الإشارات مع تحسينات الأداء والتخزين المؤقت"""
 
     def __init__(self, config, signals, keywords):
         self.config = config
         self.signals = signals
-        self.keywords = keywords  # 🚨 نحتفظ بها ولكن لا نستخدمها
+        self.keywords = keywords
         self.signal_index = {}
+        self._error_log = []
         self.setup_signal_index()
-        logger.info("🎯 نظام التصنيف الصارم مفعل - التطابق التام 100% فقط")
+        logger.info("🎯 نظام التصنيف الصارم مع التخزين المؤقت مفعل")
 
-    def setup_signal_index(self):
-        """Optimized signal lookup index for better performance"""
+    def _handle_error(self, error_msg: str, exception: Optional[Exception] = None) -> None:
+        """معالجة موحدة للأخطاء"""
+        full_error = f"{error_msg}: {exception}" if exception else error_msg
+        logger.error(full_error)
+        self._error_log.append(full_error)
+
+    def setup_signal_index(self) -> None:
+        """بناء فهرس الإشارات مع تحسين الأداء"""
         logger.debug("🔍 بناء فهرس الإشارات...")
-        for category, signal_list in self.signals.items():
-            for signal in signal_list:
-                normalized = signal.lower().strip()
-                self.signal_index[normalized] = category
-                logger.debug(f"   📝 مسجل: '{signal}' → {category}")
+        try:
+            index_count = 0
+            for category, signal_list in self.signals.items():
+                for signal in signal_list:
+                    normalized = signal.lower().strip()
+                    self.signal_index[normalized] = category
+                    index_count += 1
+            
+            # 🆕 تسجيل جميع الإشارات المتاحة للتصحيح
+            logger.debug(f"📋 فهرس الإشارات المبني: {index_count} إشارة")
+            for category, signals in self.signals.items():
+                if signals:  # فقط العناوين التي تحتوي على إشارات
+                    logger.debug(f"   📁 {category}: {len(signals)} إشارة - {signals[:3]}{'...' if len(signals) > 3 else ''}")
+                    
+        except Exception as e:
+            self._handle_error("❌ خطأ في بناء فهرس الإشارات", e)
 
-    def extract_signal(self, request):
-        """Extract signal from request"""
+    def classify_signal(self, signal_data: Dict) -> str:
+        """🎯 تصنيف الإشارة بدون التخزين المؤقت للقاموس"""
+        if not signal_data or 'signal_type' not in signal_data:
+            logger.warning("❌ بيانات الإشارة غير صالحة للتصنيف")
+            return 'unknown'
+
+        signal_type = signal_data['signal_type']
+        if not signal_type or not signal_type.strip():
+            logger.warning("❌ نوع الإشارة فارغ")
+            return 'unknown'
+            
+        signal_lower = signal_type.lower().strip()
+        
+        logger.debug(f"🔍 تصنيف الإشارة: '{signal_type}' -> '{signal_lower}'")
+        
+        # استخدام دالة مساعدة مع التخزين المؤقت للنص فقط
+        classification = self._classify_signal_text(signal_lower)
+        logger.debug(f"🎯 نتيجة التصنيف: '{signal_type}' -> '{classification}'")
+        
+        return classification
+
+    @lru_cache(maxsize=1000)
+    def _classify_signal_text(self, signal_text: str) -> str:
+        """تصنيف نص الإشارة مع التخزين المؤقت"""
+        # البحث في الفهرس أولاً للأداء
+        if signal_text in self.signal_index:
+            category = self.signal_index[signal_text]
+            logger.debug(f"   ✅ تم العثور على الإشارة في الفهرس: {signal_text} -> {category}")
+            return category
+
+        # البحث في القوائم المحددة
+        for category, signal_list in self.signals.items():
+            normalized_signals = [s.lower().strip() for s in signal_list]
+            if signal_text in normalized_signals:
+                # تحديث الفهرس للاستخدام المستقبلي
+                self.signal_index[signal_text] = category
+                logger.debug(f"   ✅ تم العثور على الإشارة في القوائم: {signal_text} -> {category}")
+                return category
+
+        # 🆕 تسجيل تفصيلي للإشارات غير المعروفة
+        logger.warning(f"❌ نوع إشارة غير معروف: '{signal_text}'")
+        
+        # 🆕 تسجيل جميع الإشارات المتاحة للمساعدة في التصحيح
+        available_signals = []
+        for cat, sig_list in self.signals.items():
+            if sig_list:
+                available_signals.extend([f"{sig}->{cat}" for sig in sig_list[:2]])  # أول إشارتين من كل فئة
+        
+        logger.debug(f"📋 الإشارات المتاحة: {', '.join(available_signals[:10])}{'...' if len(available_signals) > 10 else ''}")
+        
+        return 'unknown'
+
+    def safe_classify_signal(self, signal_data: Dict) -> str:
+        """تصنيف آمن مع معالجة الأخطاء"""
+        try:
+            return self.classify_signal(signal_data)
+        except Exception as e:
+            self._handle_error("💥 خطأ في التصنيف الآمن", e)
+            return 'unknown'
+
+    def extract_signal(self, request) -> str:
+        """استخراج الإشارة من الطلب"""
         content_type = (request.headers.get('Content-Type') or '').lower()
 
         if 'application/json' in content_type:
             data = request.get_json(silent=True) or {}
             ticker = data.get('ticker') or data.get('symbol') or 'UNKNOWN'
             signal_type = data.get('signal') or data.get('action') or 'UNKNOWN'
+            
+            logger.debug(f"📥 إشارة مستخرجة من JSON: Ticker={ticker}, Signal={signal_type}")
             return f"Ticker : {ticker} Signal : {signal_type}"
 
-        return (request.get_data(as_text=True) or "").strip()
+        raw_data = (request.get_data(as_text=True) or "").strip()
+        logger.debug(f"📥 إشارة نصية مستخرجة: {raw_data}")
+        return raw_data
 
-    def parse_signal(self, raw_signal):
-        """Parse signal text"""
+    def parse_signal(self, raw_signal: str) -> Optional[Dict]:
+        """تحليل نص الإشارة"""
         text = (raw_signal or "").strip()
         if not text:
+            logger.warning("❌ نص الإشارة فارغ")
             return None
 
         try:
-            match = re.match(r'Ticker\s*:\s*(.+?)\s+Signal\s*:\s*(.+)', text)
+            logger.debug(f"🔍 تحليل الإشارة النصية: '{text}'")
+
+            # نمط Ticker : SYMBOL Signal : SIGNAL
+            match = re.match(r'Ticker\s*:\s*(.+?)\s+Signal\s*:\s*(.+)', text, re.IGNORECASE)
             if match:
                 ticker, signal_type = match.groups()
-                return {
+                result = {
                     'symbol': ticker.strip().upper(),
                     'signal_type': signal_type.strip(),
                     'original_signal': signal_type.strip()
                 }
+                logger.debug(f"   ✅ تم التحليل بنمط Ticker/Signal: {result}")
+                return result
 
+            # نمط SYMBOL SIGNAL
             match = re.match(r'([A-Za-z0-9]+)\s+(.+)', text)
             if match:
                 ticker, signal_type = match.groups()
-                return {
+                result = {
                     'symbol': ticker.strip().upper(),
                     'signal_type': signal_type.strip(),
                     'original_signal': signal_type.strip()
                 }
+                logger.debug(f"   ✅ تم التحليل بنمط Symbol/Signal: {result}")
+                return result
 
-            return {
+            # نمط الإشارة فقط
+            result = {
                 'symbol': "UNKNOWN",
                 'signal_type': text,
                 'original_signal': text
             }
+            logger.debug(f"   ⚠️  استخدام النمط الافتراضي: {result}")
+            return result
 
         except Exception as e:
-            logger.error(f"💥 Parse error: {e}")
+            self._handle_error("💥 Parse error", e)
             return None
 
-    def safe_classify_signal(self, signal_data):
-        """🆕 تصنيف آمن مع معالجة الأخطاء المحسنة"""
-        try:
-            if not signal_data:
-                logger.error("❌ بيانات الإشارة فارغة")
-                return 'unknown'
-                
-            if 'signal_type' not in signal_data:
-                logger.error("❌ نوع الإشارة مفقود في البيانات")
-                return 'unknown'
-                
-            signal_type = signal_data.get('signal_type', '').strip()
-            if not signal_type:
-                logger.error("❌ نوع الإشارة فارغ")
-                return 'unknown'
-                
-            return self.classify_signal(signal_data)
-            
-        except Exception as e:
-            logger.error(f"💥 خطأ في التصنيف الآمن: {e}")
-            return 'unknown'
+    def get_error_log(self) -> List[str]:
+        """الحصول على سجل الأخطاء"""
+        return self._error_log.copy()
 
-    def classify_signal(self, signal_data):
-        """🎯 100% STRICT EXACT MATCH CLASSIFICATION - إصلاح الفحص المزدوج"""
-        logger.debug(f"🔍 بدء تصنيف الإشارة: {signal_data}")
-        
-        if not signal_data or 'signal_type' not in signal_data:
-            logger.error("❌ لا توجد بيانات إشارة أو نوع إشارة")
-            return 'unknown'
+    def clear_error_log(self) -> None:
+        """مسح سجل الأخطاء"""
+        self._error_log.clear()
 
-        signal_type = signal_data['signal_type']
-        if not signal_type or not signal_type.strip():
-            logger.error("❌ نوع الإشارة فارغ")
-            return 'unknown'
-            
-        signal_lower = signal_type.lower().strip()
-        
-        logger.debug(f"🔍 تحليل الإشارة: '{signal_type}' (بعد التطبيع: '{signal_lower}')")
-        
-        # 🛠️ الإصلاح: إزالة معالجة GROUP3 غير الضرورية هنا
-        # يتم معالجة GROUP3 فقط في GroupManager وليس في التصنيف الأساسي
-        
-        # 🎯 100% STRICT EXACT MATCH: Convert all signals to lowercase for exact comparison
-        trend_signals = [s.lower().strip() for s in self.signals.get('trend', [])]
-        trend_confirm_signals = [s.lower().strip() for s in self.signals.get('trend_confirm', [])]
-        exit_signals = [s.lower().strip() for s in self.signals.get('exit', [])]
-        group1_bullish_signals = [s.lower().strip() for s in self.signals.get('entry_bullish', [])]
-        group1_bearish_signals = [s.lower().strip() for s in self.signals.get('entry_bearish', [])]
-        group2_bullish_signals = [s.lower().strip() for s in self.signals.get('entry_bullish1', [])]
-        group2_bearish_signals = [s.lower().strip() for s in self.signals.get('entry_bearish1', [])]
-        
-        # 🆕 GROUP3: قوائم منفصلة للإشارات الصاعدة والهابطة
-        group3_bullish_signals = [s.lower().strip() for s in self.signals.get('group3_bullish', [])]
-        group3_bearish_signals = [s.lower().strip() for s in self.signals.get('group3_bearish', [])]
-
-        logger.debug(f"🔍 البحث في {len(trend_signals)} إشارة اتجاه")
-        # 🎯 HIGHEST PRIORITY: Check for trend signals - 100% EXACT MATCH ONLY
-        for trend_signal in trend_signals:
-            if trend_signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع إشارة اتجاه: '{signal_type}' == '{trend_signal}'")
-                logger.debug(f"🎯 تم التصنيف كإشارة اتجاه (تطابق تام 100%): '{signal_type}' → 'trend'")
-                return 'trend'
-        
-        logger.debug(f"🔍 البحث في {len(trend_confirm_signals)} إشارة تأكيد اتجاه")
-        # 🎯 Check for trend confirmation signals - 100% EXACT MATCH ONLY
-        for trend_confirm_signal in trend_confirm_signals:
-            if trend_confirm_signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع تأكيد اتجاه: '{signal_type}' == '{trend_confirm_signal}'")
-                logger.debug(f"🎯 تم التصنيف كتأكيد اتجاه (تطابق تام 100%): '{signal_type}' → 'trend_confirm'")
-                return 'trend_confirm'
-
-        logger.debug(f"🔍 البحث في {len(exit_signals)} إشارة خروج")
-        # 🎯 Check for exit signals - 100% EXACT MATCH ONLY
-        for exit_signal in exit_signals:
-            if exit_signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع إشارة خروج: '{signal_type}' == '{exit_signal}'")
-                logger.debug(f"🎯 تم التصنيف كإشارة خروج (تطابق تام 100%): '{signal_type}' → 'exit'")
-                return 'exit'
-
-        logger.debug(f"🔍 البحث في {len(group1_bullish_signals)} إشارة مجموعة1 صاعدة")
-        # 🎯 Check group1 signals - 100% EXACT MATCH ONLY
-        for signal in group1_bullish_signals:
-            if signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع مجموعة1 صاعدة: '{signal_type}' == '{signal}'")
-                logger.debug(f"🎯 تم التصنيف كدخول صاعد (مجموعة1 - تطابق تام 100%): '{signal_type}' → 'entry_bullish'")
-                return 'entry_bullish'
-                
-        logger.debug(f"🔍 البحث في {len(group1_bearish_signals)} إشارة مجموعة1 هابطة")        
-        for signal in group1_bearish_signals:
-            if signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع مجموعة1 هابطة: '{signal_type}' == '{signal}'")
-                logger.debug(f"🎯 تم التصنيف كدخول هابط (مجموعة1 - تطابق تام 100%): '{signal_type}' → 'entry_bearish'")
-                return 'entry_bearish'
-
-        logger.debug(f"🔍 البحث في {len(group2_bullish_signals)} إشارة مجموعة2 صاعدة")
-        # 🎯 Check group2 signals - 100% EXACT MATCH ONLY
-        for signal in group2_bullish_signals:
-            if signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع مجموعة2 صاعدة: '{signal_type}' == '{signal}'")
-                logger.debug(f"🎯 تم التصنيف كدخول صاعد (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bullish1'")
-                return 'entry_bullish1'
-                
-        logger.debug(f"🔍 البحث في {len(group2_bearish_signals)} إشارة مجموعة2 هابطة")
-        for signal in group2_bearish_signals:
-            if signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع مجموعة2 هابطة: '{signal_type}' == '{signal}'")
-                logger.debug(f"🎯 تم التصنيف كدخول هابط (مجموعة2 - تطابق تام 100%): '{signal_type}' → 'entry_bearish1'")
-                return 'entry_bearish1'
-
-        logger.debug(f"🔍 البحث في {len(group3_bullish_signals)} إشارة مجموعة3 صاعدة")
-        # 🎯 Check group3 signals - 100% EXACT MATCH ONLY
-        # 🛠️ الإصلاح: إزالة التنظيف الزائد للإشارات - GROUP3 له إشاراته الخاصة فقط
-        for signal in group3_bullish_signals:
-            if signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع مجموعة3 صاعدة: '{signal_type}' == '{signal}'")
-                logger.debug(f"🎯 تم التصنيف كمجموعة ثالثة صاعدة (تطابق تام 100%): '{signal_type}' → 'group3'")
-                return 'group3'
-                
-        logger.debug(f"🔍 البحث في {len(group3_bearish_signals)} إشارة مجموعة3 هابطة")
-        for signal in group3_bearish_signals:
-            if signal == signal_lower:
-                logger.debug(f"🎯 تم التطابق مع مجموعة3 هابطة: '{signal_type}' == '{signal}'")
-                logger.debug(f"🎯 تم التصنيف كمجموعة ثالثة هابطة (تطابق تام 100%): '{signal_type}' → 'group3'")
-                return 'group3'
-
-        # 🚫 NO FALLBACK - NO KEYWORD MATCHING - NO PARTIAL MATCHING
-        logger.warning(f"❌ نوع إشارة غير معروف (لا يوجد تطابق تام 100%): '{signal_type}'")
-        logger.debug(f"📋 الإشارات المعروفة في المجموعات:")
-        logger.debug(f"   🔴 مجموعة1 صاعد: {group1_bullish_signals}")
-        logger.debug(f"   🔴 مجموعة1 هابط: {group1_bearish_signals}")
-        logger.debug(f"   🔵 مجموعة2 صاعد: {group2_bullish_signals}")
-        logger.debug(f"   🔵 مجموعة2 هابط: {group2_bearish_signals}")
-        logger.debug(f"   🟢 مجموعة3 صاعد: {group3_bullish_signals}")
-        logger.debug(f"   🟢 مجموعة3 هابط: {group3_bearish_signals}")
-        
-        return 'unknown'
-
-    def validate_signal_strict(self, signal_type):
-        """🎯 التحقق الصارم من وجود الإشارة في أي قائمة"""
-        if not signal_type or not signal_type.strip():
-            return False, None
-            
-        signal_lower = signal_type.lower().strip()
-        
-        # 🛠️ الإصلاح: معالجة خاصة لإشارات GROUP3
-        group3_signal_clean = signal_lower
-        if signal_lower.startswith('bullish_'):
-            group3_signal_clean = signal_lower.replace('bullish_', '')
-        elif signal_lower.startswith('bearish_'):
-            group3_signal_clean = signal_lower.replace('bearish_', '')
-        
-        # التحقق في جميع القوائم
-        all_categories = {
-            'trend': self.signals.get('trend', []),
-            'trend_confirm': self.signals.get('trend_confirm', []),
-            'exit': self.signals.get('exit', []),
-            'entry_bullish': self.signals.get('entry_bullish', []),
-            'entry_bearish': self.signals.get('entry_bearish', []),
-            'entry_bullish1': self.signals.get('entry_bullish1', []),
-            'entry_bearish1': self.signals.get('entry_bearish1', []),
-            'group3_bullish': self.signals.get('group3_bullish', []),
-            'group3_bearish': self.signals.get('group3_bearish', [])
+    def get_cache_info(self) -> Dict:
+        """الحصول على معلومات التخزين المؤقت"""
+        classify_info = self._classify_signal_text.cache_info()
+        return {
+            'classify_cache_hits': classify_info.hits,
+            'classify_cache_misses': classify_info.misses,
+            'classify_cache_size': classify_info.currsize,
+            'signal_index_size': len(self.signal_index)
         }
-        
-        for category, signals in all_categories.items():
-            signal_list = [s.lower().strip() for s in signals]
-            if signal_lower in signal_list or (category.startswith('group3') and group3_signal_clean in signal_list):
-                return True, category
-                
-        return False, None

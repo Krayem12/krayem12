@@ -1,202 +1,173 @@
 # core/trade_manager.py
 import logging
 from datetime import datetime
-from typing import Dict, List
-import threading  # 🆕 إضافة للتعامل مع التزامن
+from typing import Dict, List, Optional, Tuple  # أضفت Tuple هنا
+import threading
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
 class TradeManager:
+    """🎯 مدير الصفقات مع تحسينات الأداء ومعالجة الأخطاء"""
+
     def __init__(self, config):
         self.config = config
-        self.trade_lock = threading.Lock()  # 🆕 قفل لإدارة التزامن
+        self.trade_lock = threading.RLock()
         
-        # ✅ قائمة الصفقات النشطة
+        # ✅ هياكل البيانات المحسنة
         self.active_trades = {}
         self.current_trend = {}
         self.previous_trend = {}
         self.last_reported_trend = {}
-        self.symbol_trade_count = {}
+        self.symbol_trade_count = defaultdict(int)
         self.total_trade_counter = 0
         self.metrics = {"trades_opened": 0, "trades_closed": 0}
         self.group_manager = None
         self.notification_manager = None
         self._last_trend_notification = {}
+        self._error_log = []
 
-    def set_group_manager(self, group_manager):
-        """🆕 تعيين GroupManager للوصول المتبادل"""
+    def _handle_error(self, error_msg: str, exception: Optional[Exception] = None) -> None:
+        """معالجة موحدة للأخطاء"""
+        full_error = f"{error_msg}: {exception}" if exception else error_msg
+        logger.error(full_error)
+        self._error_log.append(full_error)
+
+    def set_group_manager(self, group_manager) -> None:
+        """تعيين GroupManager"""
         self.group_manager = group_manager
 
-    def set_notification_manager(self, notification_manager):
-        """🆕 تعيين NotificationManager للإشعارات"""
+    def set_notification_manager(self, notification_manager) -> None:
+        """تعيين NotificationManager"""
         self.notification_manager = notification_manager
 
-    def update_trend(self, symbol, classification, signal_data):
-        """تحديث اتجاه السهم بدون حذف الإشارات المخالفة"""
-        direction = "bullish" if "bullish" in signal_data['signal_type'].lower() else "bearish"
-        
-        # 🆕 حفظ الاتجاه السابق قبل التحديث
-        old_trend = self.current_trend.get(symbol)
-        self.previous_trend[symbol] = old_trend
-        
-        # تحديث الاتجاه الحالي
-        self.current_trend[symbol] = direction
-        
-        logger.debug(f"📈 تم تحديث الاتجاه: {symbol} -> {direction.upper()} (سابقاً: {old_trend})")
-        
-        # التحقق مما إذا كان التغيير يستحق الإبلاغ
-        should_report = self._should_report_trend_change(symbol, direction, old_trend)
-        
-        # 🚫 تم إزالة تنظيف الإشارات المخالفة
-        
-        # إغلاق الصفقات المخالفة للاتجاه الجديد
-        self.close_contrarian_trades(symbol, classification)
-        
-        # 🛠️ الإصلاح: إزالة الإرسال المزدوج - يتم الإرسال من webhook_handler فقط
-        # if should_report and self.notification_manager:
-        #     self._send_simple_trend_notification(symbol, direction, old_trend, signal_data)
-        
-        return should_report, old_trend
-
-    def _send_simple_trend_notification(self, symbol: str, new_trend: str, old_trend: str, signal_data: Dict):
-        """🆕 إرسال إشعار بسيط عن تغيير الاتجاه - محجوب الآن"""
-        try:
-            from notifications.message_formatter import MessageFormatter
-            
-            # 🛠️ الإصلاح: التحقق مما إذا كان قد تم الإرسال مسبقاً
-            notification_key = f"{symbol}_{new_trend}"
-            current_time = datetime.now()
-            
-            if (notification_key in self._last_trend_notification and 
-                (current_time - self._last_trend_notification[notification_key]).total_seconds() < 10):
-                logger.debug(f"🔇 منع إشعار مكرر لـ {symbol} - {new_trend}")
-                return
-            
-            # 🆕 استخدام الدالة الأساسية
+    def open_trade(self, symbol: str, direction: str, strategy_type: str = "GROUP1", 
+                   mode_key: str = "TRADING_MODE") -> bool:
+        """فتح صفقة جديدة مع تحسينات الأداء"""
+        with self.trade_lock:
             try:
-                trend_message = MessageFormatter.format_trend_message(
-                    signal_data, 
-                    new_trend,
-                    old_trend or "UNKNOWN"
-                )
-            except AttributeError:
-                # 🆕 إذا فشلت، استخدم الدالة المبسطة
-                logger.debug("⚠️ استخدام الدالة البديلة format_simple_trend_message")
-                trend_message = MessageFormatter.format_simple_trend_message(
-                    symbol=symbol,
-                    new_trend=new_trend,
-                    old_trend=old_trend or "UNKNOWN",
-                    trigger_signal=signal_data['signal_type']
-                )
-            
-            # إرسال الإشعار
-            if self.notification_manager and self.notification_manager.should_send_message('trend'):
-                self.notification_manager.send_notifications(trend_message, 'trend')
-                
-                # 🛠️ حفظ معلومات آخر إشعار
-                self._last_trend_notification[notification_key] = current_time
-                
-                logger.debug(f"📤 تم إرسال إشعار تغيير الاتجاه البسيط لـ {symbol}")
-            else:
-                logger.debug(f"🔕 إشعارات الاتجاه معطلة - لم يتم إرسال الإشعار لـ {symbol}")
-                
-        except Exception as e:
-            logger.error(f"⚠️ خطأ في إرسال إشعار تغيير الاتجاه البسيط: {e}")
+                # التحقق من الحدود
+                if len(self.active_trades) >= self.config['MAX_OPEN_TRADES']:
+                    logger.warning(f"❌ تجاوز الحد الأقصى للصفقات المفتوحة")
+                    return False
 
-    def _should_report_trend_change(self, symbol, new_trend, old_trend):
-        """التحقق مما إذا كان تغيير الاتجاه يستحق الإبلاغ"""
-        # إذا لم يكن هناك اتجاه سابق، نبلغ عن التغيير
+                if self.symbol_trade_count[symbol] >= self.config['MAX_TRADES_PER_SYMBOL']:
+                    logger.warning(f"❌ تجاوز الحد الأقصى لصفقات الرمز {symbol}")
+                    return False
+
+                # إنشاء معرف الصفقة
+                self.total_trade_counter += 1
+                trade_id = f"{symbol}_{mode_key}_{self.total_trade_counter}_{datetime.now().strftime('%H%M%S')}"
+                
+                self.active_trades[trade_id] = {
+                    "symbol": symbol, 
+                    "side": direction,
+                    "strategy_type": strategy_type,
+                    "mode_key": mode_key,
+                    "trade_type": self._get_trade_type(mode_key),
+                    "opened_at": datetime.now().isoformat(),
+                    "trade_id": trade_id
+                }
+                
+                # تحديث العدادات
+                self.symbol_trade_count[symbol] += 1
+                self.metrics["trades_opened"] += 1
+                
+                logger.info(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
+                return True
+
+            except Exception as e:
+                self._handle_error(f"💥 خطأ في فتح الصفقة: {symbol}", e)
+                return False
+
+    def close_trade(self, trade_id: str) -> bool:
+        """إغلاق صفقة بشكل آمن"""
+        with self.trade_lock:
+            try:
+                if trade_id not in self.active_trades:
+                    logger.warning(f"⚠️ الصفقة غير موجودة: {trade_id}")
+                    return False
+
+                symbol = self.active_trades[trade_id]["symbol"]
+                
+                # تحديث العداد
+                if self.symbol_trade_count[symbol] > 0:
+                    self.symbol_trade_count[symbol] -= 1
+                else:
+                    self.symbol_trade_count[symbol] = 0
+                
+                del self.active_trades[trade_id]
+                self.metrics["trades_closed"] += 1
+                
+                logger.debug(f"✅ تم إغلاق الصفقة: {trade_id}")
+                return True
+
+            except Exception as e:
+                self._handle_error(f"💥 خطأ في إغلاق الصفقة: {trade_id}", e)
+                return False
+
+    def update_trend(self, symbol: str, classification: str, signal_data: Dict) -> Tuple[bool, Optional[str]]:
+        """تحديث اتجاه السهم"""
+        try:
+            direction = "bullish" if "bullish" in signal_data['signal_type'].lower() else "bearish"
+            
+            # حفظ الاتجاه السابق
+            old_trend = self.current_trend.get(symbol)
+            self.previous_trend[symbol] = old_trend
+            
+            # تحديث الاتجاه الحالي
+            self.current_trend[symbol] = direction
+            
+            logger.debug(f"📈 تم تحديث الاتجاه: {symbol} -> {direction.upper()}")
+            
+            # إغلاق الصفقات المخالفة
+            self.close_contrarian_trades(symbol, classification)
+            
+            # التحقق من الإبلاغ عن التغيير
+            return self._should_report_trend_change(symbol, direction, old_trend), old_trend
+
+        except Exception as e:
+            self._handle_error(f"💥 خطأ في تحديث الاتجاه: {symbol}", e)
+            return False, None
+
+    def _should_report_trend_change(self, symbol: str, new_trend: str, old_trend: Optional[str]) -> bool:
+        """التحقق من وجوب الإبلاغ عن تغيير الاتجاه"""
         if old_trend is None:
             self.last_reported_trend[symbol] = new_trend
             return True
             
-        # إذا كان الاتجاه الجديد مختلف عن الأخير الذي تم الإبلاع عنه
         last_reported = self.last_reported_trend.get(symbol)
         if last_reported != new_trend:
             self.last_reported_trend[symbol] = new_trend
-            logger.debug(f"🔄 تغيير حقيقي في الاتجاه: {symbol} من {last_reported} إلى {new_trend}")
             return True
             
-        # إذا كان نفس الاتجاه، لا نبلغ
-        logger.debug(f"🔁 نفس الاتجاه - لا إشعار: {symbol} -> {new_trend}")
         return False
 
-    def get_previous_trend(self, symbol):
-        """الحصول على الاتجاه السابق للرمز"""
-        return self.previous_trend.get(symbol, "UNKNOWN")
-
-    def close_contrarian_trades(self, symbol, classification):
-        """إغلاق الصفقات المخالفة مباشرة عند تغيير الاتجاه"""
+    def close_contrarian_trades(self, symbol: str, classification: str) -> None:
+        """إغلاق الصفقات المخالفة للاتجاه"""
         if symbol not in self.current_trend:
             return
 
         trend = self.current_trend[symbol]
-        logger.debug(f"🔍 فحص الصفقات المخالفة لـ {symbol} - الاتجاه: {trend}")
-
         trades_to_close = []
+
         for trade_id, trade in self.active_trades.items():
             if trade["symbol"] == symbol:
-                if trend == "bullish" and trade["side"] == "sell":
+                if (trend == "bullish" and trade["side"] == "sell") or \
+                   (trend == "bearish" and trade["side"] == "buy"):
                     trades_to_close.append(trade_id)
-                    logger.debug(f"🔴 إغلاق صفقة بيع مخالفة للاتجاه: {trade_id}")
-                elif trend == "bearish" and trade["side"] == "buy":
-                    trades_to_close.append(trade_id)
-                    logger.debug(f"🔴 إغلاق صفقة شراء مخالفة للاتجاه: {trade_id}")
 
-        # إغلاق الصفقات المخالفة
         for trade_id in trades_to_close:
             self.close_trade(trade_id)
 
-    def open_trade(self, symbol, direction, strategy_type="GROUP1", mode_key="TRADING_MODE"):
-        """فتح صفقة جديدة مع التحقق من الاستراتيجية"""
-        # 🔒 استخدام القفل لمنع التزامن
-        with self.trade_lock:
-            # 🎯 التحقق من أن الاستراتيجية مطابقة للإعدادات
-            expected_strategy = self.config.get(mode_key, 'GROUP1')
-            if strategy_type != expected_strategy:
-                logger.warning(f"⚠️ تناقض في الاستراتيجية: {strategy_type} vs {expected_strategy} للنمط {mode_key}")
-                # 🆕 استخدام الاستراتيجية المتوقعة بدلاً من المستلمة
-                strategy_type = expected_strategy
-            
-            # التحقق من الحد الأقصى للصفقات الإجمالي
-            if len(self.active_trades) >= self.config['MAX_OPEN_TRADES']:
-                logger.warning(f"❌ تجاوز الحد الأقصى للصفقات المفتوحة: {self.config['MAX_OPEN_TRADES']}")
-                return False
+    def get_active_trades_count(self, symbol: Optional[str] = None) -> int:
+        """الحصول على عدد الصفقات النشطة"""
+        if symbol:
+            return self.symbol_trade_count.get(symbol, 0)
+        return len(self.active_trades)
 
-            # 🆕 تهيئة عداد الرمز إذا لم يكن موجوداً
-            if symbol not in self.symbol_trade_count:
-                self.symbol_trade_count[symbol] = 0
-
-            # التحقق من الحد الأقصى للصفقات لكل رمز
-            if self.symbol_trade_count[symbol] >= self.config['MAX_TRADES_PER_SYMBOL']:
-                logger.warning(f"❌ تجاوز الحد الأقصى لصفقات الرمز {symbol}: {self.config['MAX_TRADES_PER_SYMBOL']}")
-                return False
-
-            # 🆕 إصلاح إنشاء معرف الصفقة
-            self.total_trade_counter += 1
-            trade_id = f"{symbol}_{mode_key}_{self.total_trade_counter}"
-            
-            self.active_trades[trade_id] = {
-                "symbol": symbol, 
-                "side": direction,
-                "strategy_type": strategy_type,
-                "mode_key": mode_key,
-                "trade_type": self._get_trade_type(mode_key),
-                "opened_at": self._get_current_timestamp()
-            }
-            
-            # 🆕 تحديث العداد بشكل صحيح
-            self.symbol_trade_count[symbol] += 1
-            self.metrics["trades_opened"] += 1
-            
-            logger.debug(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type} | الاتجاه: {direction.upper()}")
-            logger.debug(f"📊 صفقات {symbol}: {self.symbol_trade_count[symbol]}/{self.config['MAX_TRADES_PER_SYMBOL']}")
-            logger.debug(f"📊 الصفقات الإجمالية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
-            
-            return True
-
-    def _get_trade_type(self, mode_key):
-        """تحديد نوع الصفقة بناءً على المفتاح"""
+    def _get_trade_type(self, mode_key: str) -> str:
+        """تحديد نوع الصفقة"""
         trade_types = {
             'TRADING_MODE': '🟦 أساسي',
             'TRADING_MODE1': '🟨 نمط 1', 
@@ -204,56 +175,16 @@ class TradeManager:
         }
         return trade_types.get(mode_key, '🟦 أساسي')
 
-    def close_trade(self, trade_id):
-        """إغلاق صفقة مع تحديث العداد بشكل آمن"""
-        # 🔒 استخدام القفل لمنع التزامن
-        with self.trade_lock:
-            if trade_id in self.active_trades:
-                symbol = self.active_trades[trade_id]["symbol"]
-                mode_key = self.active_trades[trade_id].get("mode_key", "TRADING_MODE")
-                strategy_type = self.active_trades[trade_id].get("strategy_type", "GROUP1")
-                
-                logger.debug(f"✅ تم إغلاق الصفقة: {trade_id} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
-                
-                # 🆕 تحديث العداد بشكل آمن
-                if symbol in self.symbol_trade_count and self.symbol_trade_count[symbol] > 0:
-                    self.symbol_trade_count[symbol] -= 1
-                else:
-                    # إذا كان العداد غير موجود أو صفر، نعيد تهيئته
-                    self.symbol_trade_count[symbol] = 0
-                
-                del self.active_trades[trade_id]
-                self.metrics["trades_closed"] += 1
-                
-                logger.debug(f"📊 صفقات {symbol} المتبقية: {self.symbol_trade_count.get(symbol, 0)}/{self.config['MAX_TRADES_PER_SYMBOL']}")
-                logger.debug(f"📊 الصفقات الإجمالية المتبقية: {len(self.active_trades)}/{self.config['MAX_OPEN_TRADES']}")
-                return True
-            else:
-                logger.warning(f"⚠️ الصفقة غير موجودة: {trade_id}")
-                return False
+    def get_performance_metrics(self) -> Dict:
+        """الحصول على مقاييس الأداء"""
+        return {
+            'active_trades': len(self.active_trades),
+            'total_opened': self.metrics["trades_opened"],
+            'total_closed': self.metrics["trades_closed"],
+            'symbol_counts': dict(self.symbol_trade_count),
+            'error_count': len(self._error_log)
+        }
 
-    def handle_exit_signal(self, symbol, signal_type):
-        """معالجة إشارات الخروج"""
-        logger.debug(f"📤 معالجة إشارة خروج لـ {symbol}: {signal_type}")
-        trades_closed = 0
-        
-        for trade_id, trade in list(self.active_trades.items()):
-            if trade["symbol"] == symbol:
-                mode_key = trade.get("mode_key", "TRADING_MODE")
-                logger.debug(f"📤 إشارة خروج -> إغلاق الصفقة: {trade_id} | النمط: {mode_key}")
-                if self.close_trade(trade_id):
-                    trades_closed += 1
-        
-        logger.debug(f"✅ تم إغلاق {trades_closed} صفقة لـ {symbol}")
-
-    def _get_current_timestamp(self):
-        """الحصول على الطابع الزمني الحالي"""
-        from datetime import datetime
-        return datetime.now().isoformat()
-
-    def get_active_trades_count(self, symbol=None):
-        """الحصول على عدد الصفقات النشطة - إصلاح"""
-        if symbol:
-            # 🆕 استخدام العداد المخصص للرمز
-            return self.symbol_trade_count.get(symbol, 0)
-        return len(self.active_trades)
+    def get_error_log(self) -> List[str]:
+        """الحصول على سجل الأخطاء"""
+        return self._error_log.copy()

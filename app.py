@@ -1,3 +1,4 @@
+# app.py
 #!/usr/bin/env python3
 import logging
 from core.trading_system import TradingSystem

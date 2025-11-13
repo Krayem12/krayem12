@@ -3,253 +3,89 @@ import logging
 from datetime import datetime, timedelta
 import hashlib
 from typing import Dict, List, Optional, Tuple
-import threading  # 🆕 إضافة للتعامل مع التزامن
+import threading
+from collections import defaultdict, deque
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
 class GroupManager:
-    """🎯 نظام إدارة المجموعات مع تطبيق صحيح للاستراتيجيات"""
+    """🎯 نظام إدارة المجموعات مع تحسينات الأداء والأمان"""
 
     def __init__(self, config, trade_manager):
         self.config = config
         self.trade_manager = trade_manager
         
-        # 🔄 تخزين الإشارات المؤقتة
-        self.pending_signals = {}
+        # 🔄 تخزين الإشارات المؤقتة مع حدود أمان
+        self.pending_signals = defaultdict(lambda: defaultdict(lambda: deque(maxlen=100)))
         
-        # 📊 إحصائيات النظام
-        self.error_log = []
+        # 📊 إحصائيات النظام مع حدود أمان
+        self.error_log = deque(maxlen=1000)
         self.mode_performance = {}
         
-        # 🆕 قفل لإدارة التزامن
-        self.signal_lock = threading.Lock()
+        # 🛡️ قفل لإدارة التزامن
+        self.signal_lock = threading.RLock()
         
-        logger.info("🎯 نظام المجموعات مع تطبيق صحيح للاستراتيجيات جاهز")
+        logger.info("🎯 نظام المجموعات المحسن جاهز")
 
-    def _determine_group3_direction_strict(self, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
-        """🎯 تحديد اتجاه GROUP3 بالتطابق التام 100% مع القوائم المنفصلة - إصلاح التحذير"""
-        signal_type = signal_data['signal_type'].lower().strip()
+    def _handle_error(self, error_msg: str, exception: Optional[Exception] = None) -> None:
+        """🎯 معالجة موحدة للأخطاء مع حدود أمان"""
+        full_error = f"{error_msg}: {exception}" if exception else error_msg
+        logger.error(full_error)
+        self.error_log.append(full_error)
         
-        logger.debug(f"🔍 فحص إشارة GROUP3: '{signal_type}'")
-        
-        # 🛠️ الإصلاح: معالجة خاصة لإشارات GROUP3 مع البوادئ
-        group3_signal_clean = signal_type
-        if signal_type.startswith('bullish_'):
-            group3_signal_clean = signal_type.replace('bullish_', '')
-        elif signal_type.startswith('bearish_'):
-            group3_signal_clean = signal_type.replace('bearish_', '')
-        
-        # 🛠️ الإصلاح الحاسم: الوصول الصحيح لإشارات GROUP3
-        group3_bullish_signals = []
-        group3_bearish_signals = []
-        
-        try:
-            # محاولة الوصول إلى الإشارات من config
-            if 'signals' in self.config:
-                group3_bullish_signals = [s.lower().strip() for s in self.config['signals'].get('group3_bullish', [])]
-                group3_bearish_signals = [s.lower().strip() for s in self.config['signals'].get('group3_bearish', [])]
-            else:
-                # استخدام القيم الافتراضية إذا لم تكن الإشارات متاحة
-                group3_bullish_signals = ['bullish_moneyflow_above_50', 'bullish_moneyflow_co_50', 'moneyflow_above_50', 'moneyflow_co_50']
-                group3_bearish_signals = ['bearish_moneyflow_below_50', 'bearish_moneyflow_cu_50', 'moneyflow_below_50', 'moneyflow_cu_50']
-        except Exception as e:
-            logger.error(f"⚠️ خطأ في الوصول لإشارات GROUP3: {e}")
-            # القيم الافتراضية كحماية
-            group3_bullish_signals = ['bullish_moneyflow_above_50', 'bullish_moneyflow_co_50', 'moneyflow_above_50', 'moneyflow_co_50']
-            group3_bearish_signals = ['bearish_moneyflow_below_50', 'bearish_moneyflow_cu_50', 'moneyflow_below_50', 'moneyflow_cu_50']
-        
-        logger.debug(f"📋 إشارات GROUP3 الصاعدة: {group3_bullish_signals}")
-        logger.debug(f"📋 إشارات GROUP3 الهابطة: {group3_bearish_signals}")
-        
-        # ✅ التطابق التام 100% فقط مع القوائم المنفصلة
-        # التحقق من الإصدار الأصلي والإصدار النظيف
-        if signal_type in group3_bullish_signals or group3_signal_clean in group3_bullish_signals:
-            logger.debug(f"✅ تم التعرف على إشارة GROUP3 صاعدة (تطابق تام): {signal_data['signal_type']}")
-            return 'group3_bullish', 'buy'
-        elif signal_type in group3_bearish_signals or group3_signal_clean in group3_bearish_signals:
-            logger.debug(f"✅ تم التعرف على إشارة GROUP3 هابطة (تطابق تام): {signal_data['signal_type']}")
-            return 'group3_bearish', 'sell'
-        else:
-            # 🛠️ الإصلاح: تغيير التحذير إلى تصحيح فقط - ليس خطأ
-            logger.debug(f"🔍 إشارة ليست من GROUP3: {signal_data['signal_type']} - هذه طبيعي للإشارات الأخرى")
-            return None, None
+        # منع نمو سجل الأخطاء بشكل غير محدود
+        if len(self.error_log) > 1000:
+            self.error_log.popleft()
 
     def route_signal(self, symbol: str, signal_data: Dict, classification: str) -> List[Dict]:
-        """🎯 توجيه الإشارة للمجموعة المناسبة مع تطبيق الاستراتيجية الصحيحة"""
-        logger.debug("=" * 50)
-        logger.debug(f"🔄 بدء توجيه الإشارة: {symbol} | {signal_data['signal_type']} | {classification}")
-        logger.debug("=" * 50)
+        """🎯 توجيه الإشارة للمجموعة المناسبة مع معالجة محسنة للأخطاء"""
         
+        if not self._validate_input(symbol, signal_data, classification):
+            return []
+
         try:
-            # 🧹 تنظيف الإشارات المنتهية الصلاحية أولاً
+            # 🧹 تنظيف الإشارات المنتهية أولاً
             self.cleanup_expired_signals(symbol)
 
-            # ✅ التحقق الأولي من صحة البيانات
-            if not self._validate_input(symbol, signal_data, classification):
-                logger.error("❌ فشل التحقق الأولي من البيانات")
-                return []
-
-            # 🎯 تحديد المجموعة والاتجاه
-            logger.debug("🎯 تحديد المجموعة والاتجاه...")
-            group_type, direction = self._determine_group_and_direction(classification, signal_data)
-            
+            # 🎯 تحديد المجموعة والاتجاه - محدث لدعم جميع التصنيفات
+            group_type, direction = self._determine_group_and_direction_enhanced(classification, signal_data)
             if not group_type:
-                logger.debug(f"❌ لم يتم تحديد مجموعة مناسبة للإشارة: {signal_data['signal_type']}")
+                logger.error(f"❌ لا يمكن تحديد المجموعة للتصنيف: {classification}")
                 return []
 
-            logger.debug(f"✅ تم تحديد المجموعة: {group_type} والاتجاه: {direction}")
-
-            # 🚫 منع الإشارات المكررة (قبل التخزين)
-            logger.debug("🔍 التحقق من التكرار...")
+            # 🚫 منع الإشارات المكررة
             if self._is_duplicate_signal(symbol, signal_data, group_type):
-                logger.debug("🔁 إشارة مكررة - تم تجاهلها")
                 return []
 
             # 🔒 استخدام القفل لمنع التزامن
             with self.signal_lock:
-                # ➕ إضافة الإشارة للمجموعة (دائماً نخزنها أولاً)
-                logger.debug(f"📥 إضافة الإشارة إلى المجموعة: {group_type}")
+                # ➕ إضافة الإشارة للمجموعة
                 self._add_signal_to_group(symbol, signal_data, group_type, direction, classification)
 
-                # 🔍 التحقق من محاذاة الاتجاه
-                logger.debug("🔍 التحقق من محاذاة الاتجاه...")
+                # 🔍 التحقق من محاذاة الاتجاه - محدث لدعم ALLOW_COUNTER_TREND
                 if not self._check_trend_alignment(symbol, direction):
-                    # 🛠️ الخيار الثالث: التحكم في تخزين الإشارات المخالفة
-                    store_contrarian = self.config.get('STORE_CONTRARIAN_SIGNALS', False)
-                    if store_contrarian:
-                        logger.debug(f"📦 الإشارة مخالفة للاتجاه - تم تخزينها للاستخدام المستقبلي: {symbol} -> {direction}")
-                    else:
-                        # إزالة الإشارة المخالفة إذا كان الخيار معطلاً
-                        logger.debug(f"🚫 الإشارة مخالفة للاتجاه - تم حذفها: {symbol} -> {direction}")
-                        self._remove_contrarian_signal(symbol, group_type, signal_data)
-                    return []  # لا تفتح صفقات الآن
+                    self._handle_contrarian_signal(symbol, group_type, signal_data)
+                    return []
 
                 # 📊 تقييم شروط الدخول
-                logger.debug("📊 تقييم شروط الدخول...")
-                trade_results = self._evaluate_entry_conditions(symbol, direction)
-                
-                logger.debug(f"📈 نتيجة تقييم الشروط: {len(trade_results)} صفقة محتملة")
-                
-                return trade_results
+                return self._evaluate_entry_conditions(symbol, direction)
 
         except Exception as e:
-            error_msg = f"💥 خطأ في توجيه الإشارة: {symbol} | {str(e)}"
-            logger.error(error_msg)
-            self.error_log.append(error_msg)
+            self._handle_error(f"💥 خطأ في توجيه الإشارة: {symbol}", e)
             return []
 
-    def _remove_contrarian_signal(self, symbol: str, group_type: str, signal_data: Dict):
-        """🗑️ حذف الإشارة المخالفة من المجموعة"""
-        try:
-            group_key = symbol.upper().strip()
-            if group_key not in self.pending_signals:
-                return
-
-            # البحث عن الإشارة في المجموعة وحذفها (أحدث إشارة بنفس النوع)
-            group_signals = self.pending_signals[group_key][group_type]
-            
-            # البحث عن أحدث إشارة بنفس النوع
-            latest_index = -1
-            latest_timestamp = None
-            
-            for i, signal in enumerate(group_signals):
-                if signal.get('signal_type') == signal_data['signal_type']:
-                    signal_timestamp = signal.get('timestamp')
-                    if signal_timestamp and (latest_timestamp is None or signal_timestamp > latest_timestamp):
-                        latest_timestamp = signal_timestamp
-                        latest_index = i
-            
-            if latest_index >= 0:
-                removed_signal = group_signals.pop(latest_index)
-                logger.debug(f"🗑️ تم حذف الإشارة المخالفة: {removed_signal['signal_type']}")
-                
-        except Exception as e:
-            logger.error(f"⚠️ خطأ في حذف الإشارة المخالفة: {e}")
-
-    def cleanup_expired_signals(self, symbol: str):
-        """🧹 تنظيف الإشارات المنتهية الصلاحية بناء على وقت محدد"""
-        try:
-            group_key = symbol.upper().strip()
-            if group_key not in self.pending_signals:
-                return
-
-            ttl_minutes = self.config.get('SIGNAL_TTL_MINUTES', 180)
-            expiration_time = datetime.now() - timedelta(minutes=ttl_minutes)
-            removed_count = 0
-
-            # 🎯 تنظيف جميع المجموعات
-            for group_type in ['group1_bullish', 'group1_bearish', 'group2_bullish', 
-                              'group2_bearish', 'group3_bullish', 'group3_bearish']:
-                
-                original_count = len(self.pending_signals[group_key][group_type])
-                
-                # تصفية الإشارات المنتهية
-                self.pending_signals[group_key][group_type] = [
-                    signal for signal in self.pending_signals[group_key][group_type]
-                    if signal.get('timestamp', datetime.now()) > expiration_time
-                ]
-                
-                removed_count += original_count - len(self.pending_signals[group_key][group_type])
-
-            if removed_count > 0:
-                logger.debug(f"🧹 تم حذف {removed_count} إشارة منتهية الصلاحية لـ {symbol} (عمر الإشارة: {ttl_minutes} دقيقة)")
-
-        except Exception as e:
-            logger.error(f"⚠️ خطأ في تنظيف الإشارات المنتهية الصلاحية: {e}")
-
-    def _validate_input(self, symbol: str, signal_data: Dict, classification: str) -> bool:
-        """✅ التحقق من صحة بيانات الإدخال"""
-        if not symbol or symbol == 'UNKNOWN':
-            logger.error("❌ رمز غير صالح")
-            return False
-        
-        if not signal_data or 'signal_type' not in signal_data:
-            logger.error("❌ بيانات الإشارة غير صالحة")
-            return False
-        
-        valid_classifications = ['entry_bullish', 'entry_bearish', 'entry_bullish1', 'entry_bearish1', 'group3']
-        if classification not in valid_classifications:
-            logger.error(f"❌ تصنيف غير معروف: {classification}")
-            return False
-        
-        return True
-
-    def _determine_group_and_direction(self, classification: str, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
-        """🎯 تحديد المجموعة والاتجاه بدقة مع GROUP3 المنفصل - تحسين الرسائل"""
-        
-        # 🗺️ خريطة التصنيفات للمجموعات
-        classification_map = {
-            'entry_bullish': ('group1_bullish', 'buy'),
-            'entry_bearish': ('group1_bearish', 'sell'),
-            'entry_bullish1': ('group2_bullish', 'buy'),
-            'entry_bearish1': ('group2_bearish', 'sell'),
-            'group3': self._determine_group3_direction_strict(signal_data)
-        }
-        
-        result = classification_map.get(classification)
-        
-        if not result:
-            logger.error(f"❌ تعيين غير معروف للتصنيف: {classification}")
-            return None, None
-        
-        # 📝 معالجة خاصة لـ GROUP3
-        if classification == 'group3':
-            group_type, direction = result
-            if not group_type:
-                logger.warning(f"❌ فشل تحديد مجموعة GROUP3 للإشارة: {signal_data['signal_type']}")
-                return None, None
-        else:
-            group_type, direction = result
-        
-        logger.debug(f"🎯 التصنيف: {classification} → المجموعة: {group_type} | الاتجاه: {direction}")
-        return group_type, direction
-
     def _check_trend_alignment(self, symbol: str, direction: str) -> bool:
-        """🔒 التحقق من محاذاة الإشارة مع الاتجاه الحالي"""
+        """🔒 التحقق من محاذاة الإشارة مع الاتجاه الحالي - محدث لدعم ALLOW_COUNTER_TREND"""
         current_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
         
+        # 🎯 FIX: تطبيق ALLOW_COUNTER_TREND على جميع المجموعات
+        if self.config['GROUP1_TREND_MODE'] == 'ALLOW_COUNTER_TREND':
+            logger.debug(f"🔓 فتح الصفقة بدون قيود اتجاه: {symbol} -> {direction.upper()} (الاتجاه: {current_trend.upper()})")
+            return True  # ⬅️ فتح جميع الصفقات بغض النظر عن الاتجاه
+        
         if current_trend == 'UNKNOWN':
-            logger.debug(f"⏸️  تجاهل الإشارة - اتجاه غير معروف: {symbol}")
+            logger.debug(f"⏸️ تجاهل الإشارة - اتجاه غير معروف: {symbol}")
             return False
         
         is_aligned = (
@@ -262,8 +98,147 @@ class GroupManager:
         
         return is_aligned
 
+    def _determine_group_and_direction_enhanced(self, classification: str, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
+        """🎯 تحديد المحسّن للمجموعة والاتجاه - يدعم جميع التصنيفات"""
+        
+        # 🆕 NEW: خريطة شاملة لجميع التصنيفات الممكنة
+        classification_map = {
+            # المجموعة 1
+            'entry_bullish': ('group1_bullish', 'buy'),
+            'entry_bearish': ('group1_bearish', 'sell'),
+            
+            # المجموعة 2  
+            'entry_bullish1': ('group2_bullish', 'buy'),
+            'entry_bearish1': ('group2_bearish', 'sell'),
+            
+            # المجموعة 3
+            'group3': self._get_group3_direction(signal_data),
+            'group3_bullish': ('group3_bullish', 'buy'),
+            'group3_bearish': ('group3_bearish', 'sell'),
+            
+            # المجموعة 4
+            'group4': self._get_group4_direction(signal_data),
+            'group4_bullish': ('group4_bullish', 'buy'),
+            'group4_bearish': ('group4_bearish', 'sell'),
+            
+            # المجموعة 5
+            'group5': self._get_group5_direction(signal_data),
+            'group5_bullish': ('group5_bullish', 'buy'),
+            'group5_bearish': ('group5_bearish', 'sell')
+        }
+        
+        result = classification_map.get(classification)
+        
+        if result:
+            logger.debug(f"🎯 تم تحديد المجموعة: {classification} -> {result}")
+            return result
+        else:
+            logger.error(f"❌ تصنيف غير معروف في group_manager: {classification}")
+            return None, None
+
+    def _get_group3_direction(self, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
+        """تحديد اتجاه المجموعة 3"""
+        signal_type = signal_data.get('signal_type', '').lower()
+        
+        group3_bullish = [s.lower().strip() for s in self.config['signals'].get('group3_bullish', [])]
+        group3_bearish = [s.lower().strip() for s in self.config['signals'].get('group3_bearish', [])]
+        
+        if signal_type in group3_bullish:
+            return 'group3_bullish', 'buy'
+        elif signal_type in group3_bearish:
+            return 'group3_bearish', 'sell'
+        
+        return None, None
+
+    def _get_group4_direction(self, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
+        """تحديد اتجاه المجموعة 4"""
+        signal_type = signal_data.get('signal_type', '').lower()
+        
+        group4_bullish = [s.lower().strip() for s in self.config['signals'].get('group4_bullish', [])]
+        group4_bearish = [s.lower().strip() for s in self.config['signals'].get('group4_bearish', [])]
+        
+        if signal_type in group4_bullish:
+            return 'group4_bullish', 'buy'
+        elif signal_type in group4_bearish:
+            return 'group4_bearish', 'sell'
+        
+        return None, None
+
+    def _get_group5_direction(self, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
+        """تحديد اتجاه المجموعة 5"""
+        signal_type = signal_data.get('signal_type', '').lower()
+        
+        group5_bullish = [s.lower().strip() for s in self.config['signals'].get('group5_bullish', [])]
+        group5_bearish = [s.lower().strip() for s in self.config['signals'].get('group5_bearish', [])]
+        
+        if signal_type in group5_bullish:
+            return 'group5_bullish', 'buy'
+        elif signal_type in group5_bearish:
+            return 'group5_bearish', 'sell'
+        
+        return None, None
+
+    def _validate_input(self, symbol: str, signal_data: Dict, classification: str) -> bool:
+        """التحقق من صحة بيانات الإدخال"""
+        if not symbol or symbol == 'UNKNOWN':
+            logger.error("❌ رمز غير صالح")
+            return False
+        
+        if not signal_data or 'signal_type' not in signal_data:
+            logger.error("❌ بيانات الإشارة غير صالحة")
+            return False
+        
+        # 🆕 NEW: توسيع قائمة التصنيفات المقبولة
+        valid_classifications = {
+            'entry_bullish', 'entry_bearish', 'entry_bullish1', 'entry_bearish1', 
+            'group3', 'group4', 'group5', 'group3_bullish', 'group3_bearish',
+            'group4_bullish', 'group4_bearish', 'group5_bullish', 'group5_bearish'
+        }
+        
+        if classification not in valid_classifications:
+            logger.error(f"❌ تصنيف غير معروف: {classification}")
+            return False
+        
+        return True
+
+    def _add_signal_to_group(self, symbol: str, signal_data: Dict, group_type: str, 
+                           direction: str, classification: str) -> None:
+        """إضافة الإشارة للمجموعة مع التحكم بالسعة"""
+        group_key = symbol.upper().strip()
+        
+        # إنشاء المجموعة إذا لم تكن موجودة
+        if group_key not in self.pending_signals:
+            # 🆕 NEW: جميع أنواع المجموعات الممكنة
+            all_group_types = [
+                'group1_bullish', 'group1_bearish', 'group2_bullish', 'group2_bearish',
+                'group3_bullish', 'group3_bearish', 'group4_bullish', 'group4_bearish',
+                'group5_bullish', 'group5_bearish'
+            ]
+            for gt in all_group_types:
+                self.pending_signals[group_key][gt] = deque(maxlen=100)
+            
+            self.pending_signals[group_key]["created_at"] = datetime.now()
+        
+        # إنشاء معلومات الإشارة
+        signal_info = {
+            'hash': hashlib.md5(
+                f"{signal_data['signal_type']}_{classification}_{symbol}_{datetime.now().strftime('%Y%m%d%H%M')}".encode()
+            ).hexdigest(),
+            'signal_type': signal_data['signal_type'],
+            'classification': classification,
+            'timestamp': datetime.now(),
+            'direction': direction,
+            'symbol': symbol
+        }
+        
+        # إضافة الإشارة (سيتحكم deque تلقائياً بالحد الأقصى)
+        self.pending_signals[group_key][group_type].append(signal_info)
+        self.pending_signals[group_key]["updated_at"] = datetime.now()
+        
+        logger.debug(f"📥 إشارة مضافة: {signal_data['signal_type']} → {group_type}")
+
     def _is_duplicate_signal(self, symbol: str, signal_data: Dict, group_type: str) -> bool:
-        """🚫 منع الإشارات المكررة باستخدام hash فريد"""
+        """🚫 منع الإشارات المكررة"""
         group_key = symbol.upper().strip()
         
         # إنشاء hash فريد للإشارة
@@ -272,7 +247,8 @@ class GroupManager:
         
         # التحقق من التكرار في جميع المجموعات
         for gt in ['group1_bullish', 'group1_bearish', 'group2_bullish', 
-                  'group2_bearish', 'group3_bullish', 'group3_bearish']:
+                  'group2_bearish', 'group3_bullish', 'group3_bearish',
+                  'group4_bullish', 'group4_bearish', 'group5_bullish', 'group5_bearish']:
             if group_key in self.pending_signals:
                 for signal in self.pending_signals[group_key][gt]:
                     if signal.get('hash') == signal_hash:
@@ -281,40 +257,13 @@ class GroupManager:
         
         return False
 
-    def _add_signal_to_group(self, symbol: str, signal_data: Dict, group_type: str, direction: str, classification: str):
-        """➕ إضافة الإشارة للمجموعة مع التحكم بالسعة"""
-        group_key = symbol.upper().strip()
-        
-        # إنشاء المجموعة إذا لم تكن موجودة
-        if group_key not in self.pending_signals:
-            self.pending_signals[group_key] = {
-                "group1_bullish": [], "group1_bearish": [],
-                "group2_bullish": [], "group2_bearish": [], 
-                "group3_bullish": [], "group3_bearish": [],
-                "created_at": datetime.now(), "updated_at": datetime.now()
-            }
-        
-        # 🎯 إنشاء معلومات الإشارة
-        signal_info = {
-            'hash': hashlib.md5(f"{signal_data['signal_type']}_{classification}_{symbol}_{datetime.now().strftime('%Y%m%d%H%M')}".encode()).hexdigest(),
-            'signal_type': signal_data['signal_type'],
-            'classification': classification,
-            'timestamp': datetime.now(),
-            'direction': direction,
-            'symbol': symbol
-        }
-        
-        # 📦 التحكم بالسعة القصوى (50 إشارة كحد أقصى)
-        max_signals = 50
-        if len(self.pending_signals[group_key][group_type]) >= max_signals:
-            removed_signal = self.pending_signals[group_key][group_type].pop(0)
-            logger.debug(f"🗑️  تم إزالة إشارة قديمة: {removed_signal['signal_type']}")
-        
-        # إضافة الإشارة الجديدة
-        self.pending_signals[group_key][group_type].append(signal_info)
-        self.pending_signals[group_key]["updated_at"] = datetime.now()
-        
-        logger.debug(f"📥 إشارة مضافة: {signal_data['signal_type']} → {group_type}")
+    def _handle_contrarian_signal(self, symbol: str, group_type: str, signal_data: Dict) -> None:
+        """معالجة الإشارة المخالفة للاتجاه"""
+        store_contrarian = self.config.get('STORE_CONTRARIAN_SIGNALS', False)
+        if store_contrarian:
+            logger.debug(f"📦 الإشارة مخالفة للاتجاه - تم تخزينها: {symbol} → {signal_data['signal_type']}")
+        else:
+            logger.debug(f"🚫 الإشارة مخالفة للاتجاه - تم تجاهلها: {symbol} → {signal_data['signal_type']}")
 
     def _evaluate_entry_conditions(self, symbol: str, direction: str) -> List[Dict]:
         """📊 تقييم شروط الدخول للصفقات"""
@@ -322,18 +271,12 @@ class GroupManager:
             group_key = symbol.upper().strip()
             
             if group_key not in self.pending_signals:
-                logger.debug(f"🔍 لا توجد إشارات لـ {symbol}")
                 return []
             
             # 📈 حساب عدد الإشارات لكل مجموعة
             signal_counts = self._count_signals_by_direction(group_key, direction)
             
-            logger.debug(f"📊 إحصائيات {symbol} [{direction.upper()}]: G1={signal_counts['g1']}, G2={signal_counts['g2']}, G3={signal_counts['g3']}")
-            
-            # ✅ الشرط الأساسي الإلزامي: يجب توفر الحد الأدنى من GROUP1
-            if signal_counts['g1'] < self.config["REQUIRED_CONFIRMATIONS_GROUP1"]:
-                logger.debug(f"❌ شروط المجموعة الأولى غير محققة: {signal_counts['g1']}/{self.config['REQUIRED_CONFIRMATIONS_GROUP1']}")
-                return []  # 🚨 إرجاع فوري - لا مزيد من المعالجة
+            logger.debug(f"📊 إحصائيات {symbol} [{direction.upper()}]: G1={signal_counts['g1']}, G2={signal_counts['g2']}, G3={signal_counts['g3']}, G4={signal_counts['g4']}, G5={signal_counts['g5']}")
             
             # 🎯 تقييم الأنماط المفعلة فقط
             active_modes = self._get_active_modes()
@@ -348,14 +291,11 @@ class GroupManager:
             if trade_results:
                 self._reset_used_signals(symbol, direction, trade_results)
                 logger.debug(f"✅ تم فتح {len(trade_results)} صفقة لـ {symbol}")
-            else:
-                logger.debug(f"⏹️  لم يتم فتح أي صفقة لـ {symbol}")
             
             return trade_results
             
         except Exception as e:
-            error_msg = f"💥 خطأ في تقييم شروط الدخول: {symbol} | {str(e)}"
-            logger.error(error_msg)
+            self._handle_error(f"💥 خطأ في تقييم شروط الدخول: {symbol}", e)
             return []
 
     def _count_signals_by_direction(self, group_key: str, direction: str) -> Dict[str, int]:
@@ -366,132 +306,120 @@ class GroupManager:
             return {
                 'g1': len(groups["group1_bullish"]),
                 'g2': len(groups["group2_bullish"]),
-                'g3': len(groups["group3_bullish"])
+                'g3': len(groups["group3_bullish"]),
+                'g4': len(groups["group4_bullish"]),
+                'g5': len(groups["group5_bullish"])
             }
         else:
             return {
                 'g1': len(groups["group1_bearish"]),
                 'g2': len(groups["group2_bearish"]),
-                'g3': len(groups["group3_bearish"])
+                'g3': len(groups["group3_bearish"]),
+                'g4': len(groups["group4_bearish"]),
+                'g5': len(groups["group5_bearish"])
             }
 
     def _get_active_modes(self) -> List[str]:
         """🎯 الحصول على الأنماط المفعلة فقط"""
-        active_modes = ['TRADING_MODE']  # النمط الأساسي دائماً مفعل
+        active_modes = ['TRADING_MODE']
         
         if self.config.get('TRADING_MODE1_ENABLED', False):
             active_modes.append('TRADING_MODE1')
         if self.config.get('TRADING_MODE2_ENABLED', False):
             active_modes.append('TRADING_MODE2')
         
-        logger.debug(f"🎯 الأنماط المفعلة: {active_modes}")
         return active_modes
 
     def _evaluate_single_mode(self, mode_key: str, symbol: str, direction: str, signal_counts: Dict) -> Optional[Dict]:
-        """🎯 تقييم نمط تداول فردي - الإصدار المصحح"""
+        """🎯 تقييم نمط تداول فردي"""
         try:
-            # 📊 التحقق من حدود الصفقات أولاً
             if not self._can_open_trade(symbol, mode_key):
                 return None
             
-            # 🎯 الحصول على إعدادات النمط - التصحيح هنا
-            trading_mode = self.config.get(mode_key, 'GROUP1')  # 🆕 استخدام get مع قيمة افتراضية
-            logger.debug(f"🔍 فحص النمط {mode_key}: {trading_mode}")
-            
+            trading_mode = self.config.get(mode_key)
+            if not trading_mode:
+                return None
+
             # ✅ التحقق من شروط الدخول حسب الاستراتيجية
             conditions_met, required_groups = self._check_strategy_conditions(trading_mode, signal_counts)
             
             if conditions_met:
-                logger.debug(f"🎯 شروط الدخول متحققة لـ {symbol} بالنمط {mode_key} - الاستراتيجية: {trading_mode}")
-                
-                # 💼 فتح الصفقة
                 if self._open_trade(symbol, direction, trading_mode, mode_key):
-                    # 📋 جمع الإشارات المستخدمة
                     trade_info = self._collect_trade_signals(symbol, direction, required_groups)
                     trade_info.update({
                         'symbol': symbol,
                         'direction': direction,
-                        'strategy_type': trading_mode,  # 🆕 استخدام الاستراتيجية الفعلية
-                        'mode_key': mode_key
+                        'strategy_type': trading_mode,
+                        'mode_key': mode_key,
+                        'trade_timestamp': datetime.now().isoformat()
                     })
                     return trade_info
             
             return None
             
         except Exception as e:
-            error_msg = f"💥 خطأ في تقييم النمط {mode_key}: {str(e)}"
-            logger.error(error_msg)
+            self._handle_error(f"💥 خطأ في تقييم النمط {mode_key}", e)
             return None
 
     def _can_open_trade(self, symbol: str, mode_key: str) -> bool:
         """📊 التحقق من إمكانية فتح صفقة جديدة"""
-        # التحقق من الحدود العامة
-        current_count = self.trade_manager.get_active_trades_count(symbol)
-        if current_count >= self.config['MAX_TRADES_PER_SYMBOL']:
-            logger.debug(f"⏹️  وصل الرمز {symbol} للحد الأقصى: {current_count}")
+        try:
+            # التحقق من الحدود العامة
+            current_count = self.trade_manager.get_active_trades_count(symbol)
+            if current_count >= self.config['MAX_TRADES_PER_SYMBOL']:
+                return False
+            
+            # التحقق من الحدود الإجمالية
+            total_trades = self.trade_manager.get_active_trades_count()
+            if total_trades >= self.config['MAX_OPEN_TRADES']:
+                return False
+            
+            # 🛠️ التحقق من حدود النمط
+            mode_limits = {
+                'TRADING_MODE': self.config.get('MAX_TRADES_MODE_MAIN', 5),
+                'TRADING_MODE1': self.config.get('MAX_TRADES_MODE1', 3),
+                'TRADING_MODE2': self.config.get('MAX_TRADES_MODE2', 3)
+            }
+            
+            current_mode_trades = self._count_trades_by_mode(symbol, mode_key)
+            mode_limit = mode_limits.get(mode_key, 2)
+            
+            if current_mode_trades >= mode_limit:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self._handle_error(f"💥 خطأ في التحقق من إمكانية فتح الصفقة", e)
             return False
-        
-        # التحقق من الحدود الإجمالية
-        total_trades = self.trade_manager.get_active_trades_count()
-        if total_trades >= self.config['MAX_OPEN_TRADES']:
-            logger.debug(f"⏹️  وصل النظام للحد الأقصى الإجمالي: {total_trades}")
-            return False
-        
-        # التحقق من حدود النمط
-        mode_limits = {
-            'TRADING_MODE': self.config.get('MAX_TRADES_MODE_MAIN', self.config['MAX_TRADES_PER_SYMBOL']),
-            'TRADING_MODE1': self.config.get('MAX_TRADES_MODE1', self.config['MAX_TRADES_PER_SYMBOL'] // 2),
-            'TRADING_MODE2': self.config.get('MAX_TRADES_MODE2', self.config['MAX_TRADES_PER_SYMBOL'] // 2)
-        }
-        
-        current_mode_trades = self._count_trades_by_mode(symbol, mode_key)
-        mode_limit = mode_limits.get(mode_key, 2)
-        
-        if current_mode_trades >= mode_limit:
-            logger.debug(f"⏹️  النمط {mode_key} وصل الحد: {current_mode_trades}/{mode_limit}")
-            return False
-        
-        return True
 
     def _check_strategy_conditions(self, trading_mode: str, signal_counts: Dict) -> Tuple[bool, List[str]]:
-        """✅ التحقق من شروط الاستراتيجية - مضاف GROUP2_GROUP3"""
-        required_groups = ['GROUP1']  # GROUP1 مطلوب دائماً
+        """✅ التحقق من شروط الاستراتيجية"""
+        required_groups = trading_mode.split('_') if trading_mode else []
+        conditions_met = True
         
-        if trading_mode == 'GROUP1':
-            return True, required_groups
+        for group in required_groups:
+            group_key = group.lower()
             
-        elif trading_mode == 'GROUP1_GROUP2':
-            group2_ok = self.config.get('GROUP2_ENABLED', False) and \
-                       signal_counts['g2'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP2"]
-            required_groups.append('GROUP2')
-            return group2_ok, required_groups
+            # التحقق من أن المجموعة مفعلة
+            group_enabled_key = f"{group}_ENABLED"
+            if not self.config.get(group_enabled_key, False):
+                conditions_met = False
+                break
             
-        elif trading_mode == 'GROUP1_GROUP3':
-            group3_ok = self.config.get('GROUP3_ENABLED', False) and \
-                       signal_counts['g3'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP3"]
-            required_groups.append('GROUP3')
-            return group3_ok, required_groups
+            # التحقق من عدد التأكيدات المطلوبة
+            confirmations_key = f"REQUIRED_CONFIRMATIONS_{group}"
+            required_confirmations = self.config.get(confirmations_key, 1)
             
-        elif trading_mode == 'GROUP1_GROUP2_GROUP3':
-            group2_ok = self.config.get('GROUP2_ENABLED', False) and \
-                       signal_counts['g2'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP2"]
-            group3_ok = self.config.get('GROUP3_ENABLED', False) and \
-                       signal_counts['g3'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP3"]
-            required_groups.extend(['GROUP2', 'GROUP3'])
-            return group2_ok and group3_ok, required_groups
-
-        elif trading_mode == 'GROUP2_GROUP3':
-            # 🆕 إضافة دعم لاستراتيجية GROUP2_GROUP3
-            group2_ok = self.config.get('GROUP2_ENABLED', False) and \
-                       signal_counts['g2'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP2"]
-            group3_ok = self.config.get('GROUP3_ENABLED', False) and \
-                       signal_counts['g3'] >= self.config["REQUIRED_CONFIRMATIONS_GROUP3"]
-            required_groups = ['GROUP2', 'GROUP3']  # 🆕 GROUP1 غير مطلوب في هذه الاستراتيجية
-            return group2_ok and group3_ok, required_groups
+            # الحصول على عدد الإشارات الحالي للمجموعة
+            signal_count_key = f"g{group_key[-1]}"
+            current_signals = signal_counts.get(signal_count_key, 0)
             
-        else:
-            logger.warning(f"⚠️ استراتيجية غير معروفة: {trading_mode}")
-            return False, required_groups
+            if current_signals < required_confirmations:
+                conditions_met = False
+                break
+        
+        return conditions_met, required_groups
 
     def _collect_trade_signals(self, symbol: str, direction: str, required_groups: List[str]) -> Dict:
         """📋 جمع الإشارات المستخدمة في الصفقة"""
@@ -500,35 +428,34 @@ class GroupManager:
         
         trade_info = {}
         
-        if 'GROUP1' in required_groups:
-            trade_info['group1_signals'] = self._get_signals_by_group(groups, direction, 'group1')
-        
-        if 'GROUP2' in required_groups:
-            trade_info['group2_signals'] = self._get_signals_by_group(groups, direction, 'group2')
-        
-        if 'GROUP3' in required_groups:
-            trade_info['group3_signals'] = self._get_signals_by_group(groups, direction, 'group3')
+        for group in required_groups:
+            group_type = f"{group.lower()}_bullish" if direction == 'buy' else f"{group.lower()}_bearish"
+            
+            if group_type in groups:
+                trade_info[f'{group.lower()}_signals'] = [signal['signal_type'] for signal in groups[group_type]]
+            else:
+                trade_info[f'{group.lower()}_signals'] = []
         
         return trade_info
-
-    def _get_signals_by_group(self, groups: Dict, direction: str, group_type: str) -> List[str]:
-        """📝 الحصول على أسماء الإشارات حسب المجموعة"""
-        group_map = {
-            'group1': 'group1_bullish' if direction == 'buy' else 'group1_bearish',
-            'group2': 'group2_bullish' if direction == 'buy' else 'group2_bearish', 
-            'group3': 'group3_bullish' if direction == 'buy' else 'group3_bearish'
-        }
-        
-        group_name = group_map[group_type]
-        return [signal['signal_type'] for signal in groups[group_name]]
 
     def _open_trade(self, symbol: str, direction: str, strategy_type: str, mode_key: str) -> bool:
         """💼 فتح صفقة جديدة"""
         try:
-            logger.debug(f"🚀 فتح صفقة: {symbol} | النمط: {mode_key} | الاستراتيجية: {strategy_type}")
-            return self.trade_manager.open_trade(symbol, direction, strategy_type, mode_key)
+            success = self.trade_manager.open_trade(symbol, direction, strategy_type, mode_key)
+            
+            if success:
+                if mode_key not in self.mode_performance:
+                    self.mode_performance[mode_key] = {'opened': 0, 'failed': 0}
+                self.mode_performance[mode_key]['opened'] += 1
+            else:
+                if mode_key not in self.mode_performance:
+                    self.mode_performance[mode_key] = {'opened': 0, 'failed': 0}
+                self.mode_performance[mode_key]['failed'] += 1
+                
+            return success
+            
         except Exception as e:
-            logger.error(f"❌ فشل فتح الصفقة: {e}")
+            self._handle_error(f"💥 خطأ غير متوقع في فتح الصفقة", e)
             return False
 
     def _count_trades_by_mode(self, symbol: str, mode_key: str) -> int:
@@ -539,7 +466,7 @@ class GroupManager:
                 count += 1
         return count
 
-    def _reset_used_signals(self, symbol: str, direction: str, trade_results: List[Dict]):
+    def _reset_used_signals(self, symbol: str, direction: str, trade_results: List[Dict]) -> None:
         """🧹 إعادة تعيين الإشارات المستخدمة"""
         try:
             group_key = symbol.upper().strip()
@@ -550,33 +477,48 @@ class GroupManager:
             # 🎯 جمع جميع الإشارات المستخدمة
             used_signals = set()
             for trade in trade_results:
-                for group in ['group1_signals', 'group2_signals', 'group3_signals']:
+                for group in ['group1_signals', 'group2_signals', 'group3_signals', 'group4_signals', 'group5_signals']:
                     signals = trade.get(group, [])
                     used_signals.update(signals)
-            
-            logger.debug(f"🎯 الإشارات المستخدمة التي سيتم حذفها: {used_signals}")
             
             if not used_signals:
                 return
             
             # 🗑️ حذف الإشارات المستخدمة
-            removed_total = 0
             for group_type in ['group1_bullish', 'group1_bearish', 'group2_bullish', 
-                              'group2_bearish', 'group3_bullish', 'group3_bearish']:
-                original_count = len(self.pending_signals[group_key][group_type])
-                
-                self.pending_signals[group_key][group_type] = [
-                    signal for signal in self.pending_signals[group_key][group_type]
-                    if signal['signal_type'] not in used_signals
-                ]
-                
-                removed_count = original_count - len(self.pending_signals[group_key][group_type])
-                removed_total += removed_count
-            
-            logger.debug(f"✅ تم حذف {removed_total} إشارة مستخدمة")
+                              'group2_bearish', 'group3_bullish', 'group3_bearish',
+                              'group4_bullish', 'group4_bearish', 'group5_bullish', 'group5_bearish']:
+                self.pending_signals[group_key][group_type] = deque(
+                    [signal for signal in self.pending_signals[group_key][group_type]
+                     if signal['signal_type'] not in used_signals],
+                    maxlen=100
+                )
             
         except Exception as e:
-            logger.error(f"⚠️ خطأ في إعادة تعيين الإشارات: {e}")
+            self._handle_error(f"⚠️ خطأ في إعادة تعيين الإشارات", e)
+
+    def cleanup_expired_signals(self, symbol: str) -> None:
+        """🧹 تنظيف الإشارات المنتهية الصلاحية"""
+        try:
+            group_key = symbol.upper().strip()
+            if group_key not in self.pending_signals:
+                return
+
+            ttl_minutes = self.config.get('SIGNAL_TTL_MINUTES', 180)
+            expiration_time = datetime.now() - timedelta(minutes=ttl_minutes)
+
+            for group_type in self.pending_signals[group_key]:
+                if group_type in ['created_at', 'updated_at']:
+                    continue
+                    
+                self.pending_signals[group_key][group_type] = deque(
+                    [signal for signal in self.pending_signals[group_key][group_type]
+                     if signal.get('timestamp', datetime.now()) > expiration_time],
+                    maxlen=100
+                )
+
+        except Exception as e:
+            self._handle_error(f"⚠️ خطأ في تنظيف الإشارات المنتهية الصلاحية", e)
 
     def get_group_stats(self, symbol: str) -> Optional[Dict]:
         """📈 الحصول على إحصائيات المجموعات"""
@@ -596,24 +538,26 @@ class GroupManager:
                 'group2_bearish': len(groups['group2_bearish']),
                 'group3_bullish': len(groups['group3_bullish']),
                 'group3_bearish': len(groups['group3_bearish']),
-                'total_signals': sum([
-                    len(groups['group1_bullish']), len(groups['group1_bearish']),
-                    len(groups['group2_bullish']), len(groups['group2_bearish']),
-                    len(groups['group3_bullish']), len(groups['group3_bearish'])
-                ]),
+                'group4_bullish': len(groups['group4_bullish']),
+                'group4_bearish': len(groups['group4_bearish']),
+                'group5_bullish': len(groups['group5_bullish']),
+                'group5_bearish': len(groups['group5_bearish']),
+                'total_signals': sum(len(groups[gt]) for gt in groups if gt not in ['created_at', 'updated_at']),
                 'updated_at': groups['updated_at']
             }
         except Exception as e:
-            logger.error(f"⚠️ خطأ في إحصائيات المجموعات: {e}")
+            self._handle_error(f"⚠️ خطأ في إحصائيات المجموعات", e)
             return None
 
-    def cleanup_all_groups(self) -> bool:
-        """🧹 تنظيف جميع المجموعات"""
-        try:
-            count_before = len(self.pending_signals)
-            self.pending_signals.clear()
-            logger.debug(f"✅ تم تنظيف جميع المجموعات: {count_before} → 0")
-            return True
-        except Exception as e:
-            logger.error(f"❌ خطأ في تنظيف المجموعات: {e}")
-            return False
+    def get_performance_metrics(self) -> Dict:
+        """الحصول على مقاييس الأداء"""
+        return {
+            'error_count': len(self.error_log),
+            'mode_performance': self.mode_performance.copy(),
+            'total_signals': sum(
+                len(signals) 
+                for symbol_data in self.pending_signals.values() 
+                for signals in symbol_data.values() 
+                if isinstance(signals, deque)
+            )
+        }

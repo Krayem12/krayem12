@@ -20,7 +20,7 @@ class TradingSystem:
     """Trading System with DETAILED TREND CHANGE NOTIFICATIONS"""
 
     def __init__(self):
-        logger.info("🚀 Starting Trading System with COMPLETE METHOD IMPLEMENTATION + GROUP3...")
+        logger.info("🚀 Starting Trading System with COMPLETE METHOD IMPLEMENTATION + GROUP3 + GROUP4 + GROUP5...")
         try:
             self.setup_managers()
             self.setup_flask()
@@ -99,6 +99,30 @@ class TradingSystem:
         """Display system information"""
         self.config_manager.display_config()
         self.display_loaded_signals()
+        
+        # 🛠️ الإصلاح: التحقق من تطبيق الإعدادات
+        self._verify_strategy_application()
+
+    def _verify_strategy_application(self):
+        """🛠️ التحقق من تطبيق استراتيجيات التداول بشكل صحيح"""
+        logger.info("\n🔍 التحقق من تطبيق استراتيجيات التداول:")
+        
+        modes_to_check = [
+            ('TRADING_MODE', 'النمط الأساسي'),
+            ('TRADING_MODE1', 'النمط الإضافي 1'), 
+            ('TRADING_MODE2', 'النمط الإضافي 2')
+        ]
+        
+        for mode_key, mode_name in modes_to_check:
+            mode_value = self.config.get(mode_key)
+            enabled = self.config.get(f'{mode_key}_ENABLED', False)
+            
+            logger.info(f"   {mode_name}: {mode_value} ({'✅ مفعل' if enabled else '❌ معطل'})")
+            
+            if enabled and not mode_value:
+                logger.error(f"   ❌ {mode_name} مفعل ولكن لا توجد استراتيجية محددة!")
+            elif enabled:
+                logger.info(f"   ✅ {mode_name} مفعل ومسجل بشكل صحيح: {mode_value}")
 
     def display_loaded_signals(self):
         """Display loaded signals information"""
@@ -115,6 +139,8 @@ class TradingSystem:
         logger.info(f"   • Group1 Trend Mode: {self.config['GROUP1_TREND_MODE']}")
         logger.info(f"   • Group2 Enabled: {'✅ YES' if self.config['GROUP2_ENABLED'] else '❌ NO'}")
         logger.info(f"   • Group3 Enabled: {'✅ YES' if self.config['GROUP3_ENABLED'] else '❌ NO'}")
+        logger.info(f"   • Group4 Enabled: {'✅ YES' if self.config['GROUP4_ENABLED'] else '❌ NO'}")  # 🆕 إضافة Group4
+        logger.info(f"   • Group5 Enabled: {'✅ YES' if self.config['GROUP5_ENABLED'] else '❌ NO'}")  # 🆕 إضافة Group5
         
         # 🆕 عرض معلومات الإشعارات التفصيلية
         logger.info(f"\n🧹 Detailed Trend Notifications: {'✅ ACTIVE' if self.trade_manager.group_manager else '❌ INACTIVE'}")
@@ -124,20 +150,22 @@ class TradingSystem:
         """Get system status"""
         return {
             "status": "active",
-            "version": "10.0_detailed_trend",
+            "version": "11.0_detailed_trend_with_group4_group5",
             "timestamp": datetime.now().isoformat(),
             "port": self.port,
             "trading_mode": self.config['TRADING_MODE'],
             "group1_trend_mode": self.config['GROUP1_TREND_MODE'],
             "group2_enabled": self.config['GROUP2_ENABLED'],
             "group3_enabled": self.config['GROUP3_ENABLED'],
+            "group4_enabled": self.config['GROUP4_ENABLED'],  # 🆕 إضافة Group4
+            "group5_enabled": self.config['GROUP5_ENABLED'],  # 🆕 إضافة Group5
             "detailed_trend_notifications": bool(self.trade_manager.group_manager and self.trade_manager.notification_manager)
         }
 
     def get_signal_statistics(self, symbol: str):
         """🆕 الحصول على إحصائيات الإشارات لرمز معين"""
         try:
-            stats = self.group_manager.get_signal_statistics(symbol)
+            stats = self.group_manager.get_group_stats(symbol)
             return {
                 "symbol": symbol,
                 "timestamp": datetime.now().isoformat(),

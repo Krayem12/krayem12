@@ -3,133 +3,136 @@ import os
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
+from functools import lru_cache
+from typing import Dict, List, Tuple, Optional
+
 from .validators import ConfigValidator
 
 # تحميل متغيرات البيئة من ملف .env
 load_dotenv()
 
-# 🛠️ الإصلاح: تهيئة نظام الأساسي للتسجيل أولاً
-logging.basicConfig(
-    level=logging.ERROR,  # المستوى الافتراضي حتى يتم تحميل الإعدادات
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
 logger = logging.getLogger(__name__)
 
 class ConfigManager:
+    """🎯 مدير الإعدادات مع تحسينات الأداء ومعالجة الأخطاء"""
+    
     def __init__(self):
         self.config = {}
         self.signals = {}
         self.keywords = {}
         self.port = 10000
+        self._error_log = []
         self.setup_config()
 
-    def setup_config(self):
-        """Final configuration setup with VALIDATION"""
-        self.config = {
-            # Basic Settings
-            'DEBUG': os.getenv('DEBUG', 'true').lower() == 'true',
-            'LOG_LEVEL': os.getenv('LOG_LEVEL', 'DEBUG').upper(),
+    def _handle_error(self, error_msg: str, exception: Optional[Exception] = None) -> None:
+        """🎯 معالجة موحدة للأخطاء"""
+        full_error = f"{error_msg}: {exception}" if exception else error_msg
+        logger.error(full_error)
+        self._error_log.append(full_error)
 
-            # Telegram Settings
-            'TELEGRAM_ENABLED': os.getenv('TELEGRAM_ENABLED', 'true').lower() == 'true',
-            'TELEGRAM_BOT_TOKEN': os.getenv('TELEGRAM_BOT_TOKEN', 'dummy_token_for_development'),
-            'TELEGRAM_CHAT_ID': os.getenv('TELEGRAM_CHAT_ID', 'dummy_chat_id'),
+    def _safe_int_convert(self, env_key: str, default: int) -> int:
+        """تحويل آمن للقيم الرقمية مع معالجة الأخطاء"""
+        try:
+            value = os.getenv(env_key)
+            if value is None:
+                return default
 
-            # External Server Settings
-            'EXTERNAL_SERVER_ENABLED': os.getenv('EXTERNAL_SERVER_ENABLED', 'true').lower() == 'true',
-            'EXTERNAL_SERVER_URL': os.getenv('EXTERNAL_SERVER_URL', 'https://example.com'),
+            cleaned_value = value.strip()
+            if not cleaned_value:
+                return default
 
-            # Trade Management Settings
-            'MAX_OPEN_TRADES': self._safe_int_convert('MAX_OPEN_TRADES', 10),
-            'MAX_TRADES_PER_SYMBOL': self._safe_int_convert('MAX_TRADES_PER_SYMBOL', 3),
+            return int(cleaned_value)
+        except (ValueError, TypeError) as e:
+            self._handle_error(f"⚠️ Invalid {env_key} value", e)
+            return default
 
-            # 🎯 MULTI-MODE Trading Strategy Settings - مع التحقق من الصحة
-            'TRADING_MODE': self._validate_trading_mode(os.getenv('TRADING_MODE', 'GROUP1_GROUP2_GROUP3')),
-            'TRADING_MODE1': self._validate_trading_mode(os.getenv('TRADING_MODE1', 'GROUP1')),
-            'TRADING_MODE2': self._validate_trading_mode(os.getenv('TRADING_MODE2', 'GROUP1')),
-            'TRADING_MODE1_ENABLED': os.getenv('TRADING_MODE1_ENABLED', 'false').lower() == 'true',
-            'TRADING_MODE2_ENABLED': os.getenv('TRADING_MODE2_ENABLED', 'false').lower() == 'true',
+    def setup_config(self) -> None:
+        """الإعداد النهائي للتكوين مع تحسين الأداء"""
+        try:
+            self.config = {
+                # Basic Settings
+                'DEBUG': os.getenv('DEBUG', 'true').lower() == 'true',
+                'LOG_LEVEL': os.getenv('LOG_LEVEL', 'DEBUG').upper(),
 
-            # Group1 Settings
-            'REQUIRED_CONFIRMATIONS_GROUP1': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP1', 2),
-            'GROUP1_TREND_MODE': os.getenv('GROUP1_TREND_MODE', 'ONLY_TREND').strip().upper(),
+                # Telegram Settings
+                'TELEGRAM_ENABLED': os.getenv('TELEGRAM_ENABLED', 'true').lower() == 'true',
+                'TELEGRAM_BOT_TOKEN': os.getenv('TELEGRAM_BOT_TOKEN', 'dummy_token_for_development'),
+                'TELEGRAM_CHAT_ID': os.getenv('TELEGRAM_CHAT_ID', 'dummy_chat_id'),
 
-            # Group2 Settings
-            'GROUP2_ENABLED': os.getenv('GROUP2_ENABLED', 'true').lower() == 'true',
-            'REQUIRED_CONFIRMATIONS_GROUP2': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP2', 1),
+                # External Server Settings
+                'EXTERNAL_SERVER_ENABLED': os.getenv('EXTERNAL_SERVER_ENABLED', 'true').lower() == 'true',
+                'EXTERNAL_SERVER_URL': os.getenv('EXTERNAL_SERVER_URL', 'https://example.com'),
 
-            # Group3 Settings
-            'GROUP3_ENABLED': os.getenv('GROUP3_ENABLED', 'true').lower() == 'true',
-            'REQUIRED_CONFIRMATIONS_GROUP3': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP3', 1),
+                # Trade Management Settings
+                'MAX_OPEN_TRADES': self._safe_int_convert('MAX_OPEN_TRADES', 10),
+                'MAX_TRADES_PER_SYMBOL': self._safe_int_convert('MAX_TRADES_PER_SYMBOL', 3),
 
-            # Trend Settings
-            'RESPECT_TREND_FOR_REGULAR_TRADES': os.getenv('RESPECT_TREND_FOR_REGULAR_TRADES', 'true').lower() == 'true',
-            'RESPECT_TREND_FOR_GROUP2': os.getenv('RESPECT_TREND_FOR_GROUP2', 'true').lower() == 'true',
-            'RESET_TRADES_ON_TREND_CHANGE': os.getenv('RESET_TRADES_ON_TREND_CHANGE', 'true').lower() == 'true',
-            'ENABLE_COUNTER_TREND_PRESERVATION': False,
+                # 🎯 MULTI-MODE Trading Strategy Settings
+                'TRADING_MODE': self._validate_trading_mode_strict(os.getenv('TRADING_MODE')),
+                'TRADING_MODE1': self._validate_trading_mode_strict(os.getenv('TRADING_MODE1')),
+                'TRADING_MODE2': self._validate_trading_mode_strict(os.getenv('TRADING_MODE2')),
+                
+                'TRADING_MODE1_ENABLED': os.getenv('TRADING_MODE1_ENABLED', 'false').lower() == 'true',
+                'TRADING_MODE2_ENABLED': os.getenv('TRADING_MODE2_ENABLED', 'false').lower() == 'true',
 
-            # 🆕 إعداد تخزين الإشارات المخالفة
-            'STORE_CONTRARIAN_SIGNALS': os.getenv('STORE_CONTRARIAN_SIGNALS', 'false').lower() == 'true',
+                # Group Settings
+                'GROUP1_ENABLED': True,
+                'REQUIRED_CONFIRMATIONS_GROUP1': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP1', 2),
+                'GROUP1_TREND_MODE': os.getenv('GROUP1_TREND_MODE', 'ONLY_TREND').strip().upper(),
 
-            # Notification Controls
-            'SEND_TREND_MESSAGES': os.getenv('SEND_TREND_MESSAGES', 'false').lower() == 'true',
-            'SEND_ENTRY_MESSAGES': os.getenv('SEND_ENTRY_MESSAGES', 'true').lower() == 'true',
-            'SEND_EXIT_MESSAGES': os.getenv('SEND_EXIT_MESSAGES', 'true').lower() == 'true',
-            'SEND_CONFIRMATION_MESSAGES': os.getenv('SEND_CONFIRMATION_MESSAGES', 'false').lower() == 'true',
-            'SEND_GENERAL_MESSAGES': os.getenv('SEND_GENERAL_MESSAGES', 'false').lower() == 'true',
+                'GROUP2_ENABLED': os.getenv('GROUP2_ENABLED', 'true').lower() == 'true',
+                'REQUIRED_CONFIRMATIONS_GROUP2': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP2', 1),
 
-            # Daily Cleanup Settings
-            'DAILY_CLEANUP_ENABLED': os.getenv('DAILY_CLEANUP_ENABLED', 'true').lower() == 'true',
-            'DAILY_CLEANUP_TIME': os.getenv('DAILY_CLEANUP_TIME', '01:00'),
+                'GROUP3_ENABLED': os.getenv('GROUP3_ENABLED', 'true').lower() == 'true',
+                'REQUIRED_CONFIRMATIONS_GROUP3': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP3', 1),
 
-            # 🆕 إعدادات انتهاء صلاحية الإشارات
-            'SIGNAL_TTL_MINUTES': self._safe_int_convert('SIGNAL_TTL_MINUTES', 180),  # 180 دقيقة افتراضياً
-        }
+                'GROUP4_ENABLED': os.getenv('GROUP4_ENABLED', 'true').lower() == 'true',
+                'REQUIRED_CONFIRMATIONS_GROUP4': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP4', 1),
 
-        self.port = self._robust_port_handling()
-        self.config['PORT'] = self.port
-        
-        # 🛠️ الإصلاح: تطبيق مستوى التسجيل على جميع اللوجرات
-        self._apply_logging_config_enhanced()
+                'GROUP5_ENABLED': os.getenv('GROUP5_ENABLED', 'true').lower() == 'true',
+                'REQUIRED_CONFIRMATIONS_GROUP5': self._safe_int_convert('REQUIRED_CONFIRMATIONS_GROUP5', 1),
 
-        # 🎯 تحميل الإشارات مع قوائم GROUP3 المنفصلة
-        self.signals = {
-            'trend': self._load_signal_list('TREND_SIGNALS', 'bullish_tracer,bearish_tracer'),
-            'trend_confirm': self._load_signal_list('TREND_CONFIRM_SIGNALS', 'rayian'),
-            'entry_bullish': self._load_signal_list('ENTRY_SIGNALS_BULLISH', 'oversold_bullish_hyperwave_signal,regular_bullish_hyperwave_signal'),
-            'entry_bearish': self._load_signal_list('ENTRY_SIGNALS_BEARISH', 'overbought_bearish_hyperwave_signal,regular_bullish_hyperwave_signal'),
-            'exit': self._load_signal_list('EXIT_SIGNALS', 'exit_buy,exit_sell'),
-            'general': self._load_signal_list('GENERAL_SIGNALS', 'krayem yhia alanizy'),
-            'entry_bullish1': self._load_signal_list('ENTRY_SIGNALS_BULLISH1', 'Discount,bullish_catcher'),
-            'entry_bearish1': self._load_signal_list('ENTRY_SIGNALS_BEARISH1', 'Premium,bearish_catcher'),
-            # 🆕 قوائم GROUP3 المنفصلة للإشارات الصاعدة والهابطة
-            'group3_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BULLISH', 'bullish_moneyflow_above_50,bullish_moneyflow_co_50'),
-            'group3_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BEARISH', 'bearish_moneyflow_below_50,bearish_moneyflow_cu_50')
-        }
+                # Trend Settings
+                'RESPECT_TREND_FOR_REGULAR_TRADES': os.getenv('RESPECT_TREND_FOR_REGULAR_TRADES', 'true').lower() == 'true',
+                'RESPECT_TREND_FOR_GROUP2': os.getenv('RESPECT_TREND_FOR_GROUP2', 'true').lower() == 'true',
+                'RESET_TRADES_ON_TREND_CHANGE': os.getenv('RESET_TRADES_ON_TREND_CHANGE', 'true').lower() == 'true',
+                'ENABLE_COUNTER_TREND_PRESERVATION': False,
 
-        # 🛠️ الإصلاح: إضافة الإشارات إلى config للوصول العالمي
-        self.config['signals'] = self.signals
+                # Signal Storage
+                'STORE_CONTRARIAN_SIGNALS': os.getenv('STORE_CONTRARIAN_SIGNALS', 'false').lower() == 'true',
 
-        self.setup_keywords()
-        self.validate_configuration()
+                # Notification Controls
+                'SEND_TREND_MESSAGES': os.getenv('SEND_TREND_MESSAGES', 'false').lower() == 'true',
+                'SEND_ENTRY_MESSAGES': os.getenv('SEND_ENTRY_MESSAGES', 'true').lower() == 'true',
+                'SEND_EXIT_MESSAGES': os.getenv('SEND_EXIT_MESSAGES', 'true').lower() == 'true',
+                'SEND_CONFIRMATION_MESSAGES': os.getenv('SEND_CONFIRMATION_MESSAGES', 'false').lower() == 'true',
+                'SEND_GENERAL_MESSAGES': os.getenv('SEND_GENERAL_MESSAGES', 'false').lower() == 'true',
 
-    def _validate_trading_mode(self, mode_value):
-        """🆕 التحقق من صحة نمط التداول"""
-        valid_modes = ['GROUP1', 'GROUP1_GROUP2', 'GROUP1_GROUP3', 'GROUP1_GROUP2_GROUP3', 
-                      'GROUP2_GROUP3', 'GROUP2', 'GROUP3']
-        
-        mode_clean = mode_value.strip().upper()
-        
-        if mode_clean not in valid_modes:
-            logger.warning(f"⚠️ نمط تداول غير صالح: {mode_value}, استخدام GROUP1 افتراضي")
-            return 'GROUP1'
-        
-        logger.info(f"✅ تم تحميل نمط التداول: {mode_clean}")
-        return mode_clean
+                # Cleanup Settings
+                'DAILY_CLEANUP_ENABLED': os.getenv('DAILY_CLEANUP_ENABLED', 'true').lower() == 'true',
+                'DAILY_CLEANUP_TIME': os.getenv('DAILY_CLEANUP_TIME', '01:00'),
+                'SIGNAL_TTL_MINUTES': self._safe_int_convert('SIGNAL_TTL_MINUTES', 180),
+            }
 
-    def _apply_logging_config_enhanced(self):
-        """🛠️ الإصلاح المحسّن النهائي: تطبيق إعدادات التسجيل مع معالجة urllib3"""
+            self.port = self._robust_port_handling()
+            self.config['PORT'] = self.port
+            
+            self._apply_logging_config_enhanced()
+            self._validate_trading_modes_strict()
+
+            # 🎯 تحميل الإشارات مع التخزين المؤقت
+            self.signals = self._load_all_signals()
+            self.config['signals'] = self.signals
+
+            self.setup_keywords()
+            self.validate_configuration()
+
+        except Exception as e:
+            self._handle_error("❌ فشل إعداد التكوين", e)
+            raise
+
+    def _apply_logging_config_enhanced(self) -> None:
+        """🛠️ تطبيق إعدادات التسجيل المحسنة"""
         try:
             log_level = self.config['LOG_LEVEL']
             debug_mode = self.config['DEBUG']
@@ -233,68 +236,111 @@ class ConfigManager:
             # القيم الافتراضية في حالة الخطأ
             logging.getLogger().setLevel(logging.DEBUG)
 
-    def _robust_port_handling(self):
-        """ROBUST port handling - works even with empty or invalid PORT"""
+    def _validate_trading_mode_strict(self, mode_value: Optional[str]) -> str:
+        """التحقق الصارم من نمط التداول"""
+        if mode_value is None:
+            raise ValueError("❌ TRADING_MODE غير محدد - مطلوب قيمة في ملف .env")
+        
+        if not mode_value.strip():
+            raise ValueError("❌ TRADING_MODE فارغ - مطلوب قيمة في ملف .env")
+            
+        mode_clean = mode_value.strip().upper()
+        valid_groups = ['GROUP1', 'GROUP2', 'GROUP3', 'GROUP4', 'GROUP5']
+        groups_in_mode = mode_clean.split('_')
+        
+        for group in groups_in_mode:
+            if group not in valid_groups:
+                raise ValueError(f"❌ مجموعة غير صالحة في TRADING_MODE: {group}")
+        
+        if not groups_in_mode:
+            raise ValueError("❌ TRADING_MODE يجب أن يحتوي على مجموعة واحدة على الأقل")
+        
+        logger.info(f"✅ تم تحميل نمط التداول: {mode_clean}")
+        return mode_clean
+
+    def _validate_trading_modes_strict(self) -> None:
+        """🚫 التحقق النهائي من أنماط التداول - إيقاف النظام إذا كان هناك خطأ"""
+        required_modes = ['TRADING_MODE']
+        
+        for mode_key in required_modes:
+            mode_value = self.config.get(mode_key)
+            if mode_value is None:
+                raise ValueError(f"❌ {mode_key} مطلوب في ملف .env")
+        
+        # التحقق من الأنماط الإضافية إذا كانت مفعلة
+        if self.config.get('TRADING_MODE1_ENABLED') and self.config.get('TRADING_MODE1') is None:
+            raise ValueError("❌ TRADING_MODE1 مطلوب في ملف .env لأن TRADING_MODE1_ENABLED=true")
+            
+        if self.config.get('TRADING_MODE2_ENABLED') and self.config.get('TRADING_MODE2') is None:
+            raise ValueError("❌ TRADING_MODE2 مطلوب في ملف .env لأن TRADING_MODE2_ENABLED=true")
+
+    def _robust_port_handling(self) -> int:
+        """معالجة قوية لمنفذ الخادم"""
         try:
             port_value = os.getenv('PORT', '').strip()
             
             if not port_value:
-                logging.info("🔧 PORT is empty or not set, using default: 10000")
+                logger.info("🔧 PORT غير محدد، استخدام الإفتراضي: 10000")
                 return 10000
             
             port_int = int(port_value)
             
             if 1 <= port_int <= 65535:
-                logging.info(f"✅ PORT successfully loaded: {port_int}")
+                logger.info(f"✅ تم تحميل PORT بنجاح: {port_int}")
                 return port_int
             else:
-                logging.warning(f"⚠️ PORT {port_int} is out of range (1-65535), using default: 10000")
+                logger.warning(f"⚠️ PORT خارج النطاق، استخدام الإفتراضي: 10000")
                 return 10000
                 
         except (ValueError, TypeError) as e:
-            logging.error(f"⚠️ Invalid PORT value '{os.getenv('PORT')}', using default 10000: {e}")
+            self._handle_error("⚠️ Invalid PORT value", e)
             return 10000
 
-    def _safe_int_convert(self, env_key, default):
-        """Safe integer conversion with error handling"""
-        try:
-            value = os.getenv(env_key)
-            if value is None:
-                return default
+    @lru_cache(maxsize=1)
+    def _load_all_signals(self) -> Dict[str, List[str]]:
+        """🎯 تحميل جميع الإشارات مع التخزين المؤقت"""
+        return {
+            'trend': self._load_signal_list('TREND_SIGNALS', 'bullish_tracer,bearish_tracer'),
+            'trend_confirm': self._load_signal_list('TREND_CONFIRM_SIGNALS', 'rayian'),
+            'entry_bullish': self._load_signal_list('ENTRY_SIGNALS_BULLISH', 'oversold_bullish_hyperwave_signal,regular_bullish_hyperwave_signal'),
+            'entry_bearish': self._load_signal_list('ENTRY_SIGNALS_BEARISH', 'overbought_bearish_hyperwave_signal,regular_bullish_hyperwave_signal'),
+            'exit': self._load_signal_list('EXIT_SIGNALS', 'exit_buy,exit_sell'),
+            'general': self._load_signal_list('GENERAL_SIGNALS', 'krayem yhia alanizy'),
+            'entry_bullish1': self._load_signal_list('ENTRY_SIGNALS_BULLISH1', 'Discount,bullish_catcher'),
+            'entry_bearish1': self._load_signal_list('ENTRY_SIGNALS_BEARISH1', 'Premium,bearish_catcher'),
+            'group3_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BULLISH', 'bullish_moneyflow_above_50,bullish_moneyflow_co_50'),
+            'group3_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BEARISH', 'bearish_moneyflow_below_50,bearish_moneyflow_cu_50'),
+            'group4_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP4_BULLISH', 'group4_bullish_signal1,group4_bullish_signal2'),
+            'group4_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP4_BEARISH', 'group4_bearish_signal1,group4_bearish_signal2'),
+            'group5_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP5_BULLISH', 'group5_bullish_signal1,group5_bullish_signal2'),
+            'group5_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP5_BEARISH', 'group5_bearish_signal1,group5_bearish_signal2')
+        }
 
-            cleaned_value = value.strip()
-            if not cleaned_value:
-                return default
-
-            return int(cleaned_value)
-        except (ValueError, TypeError) as e:
-            logging.error(f"⚠️ Invalid {env_key} value '{os.getenv(env_key)}', using default {default}: {e}")
-            return default
-
-    def _load_signal_list(self, env_key, default_signals=""):
-        """Load signals from environment with default values"""
+    def _load_signal_list(self, env_key: str, default_signals: str = "") -> List[str]:
+        """تحميل قائمة الإشارات من البيئة"""
         try:
             signal_str = os.getenv(env_key, default_signals)
-            if signal_str:
-                signals = [s.strip() for s in signal_str.split(',') if s.strip()]
-                logging.info(f"   ✅ Loaded {len(signals)} signals from {env_key}")
-                return signals
-            else:
-                logging.warning(f"   ⚠️ No signals found for {env_key}, using defaults")
+            if not signal_str:
+                logger.warning(f"   ⚠️ لا توجد إشارات لـ {env_key}، استخدام الإفتراضيات")
                 return [s.strip() for s in default_signals.split(',') if s.strip()]
+                
+            signals = [s.strip() for s in signal_str.split(',') if s.strip()]
+            logger.info(f"   ✅ تم تحميل {len(signals)} إشارة من {env_key}")
+            return signals
         except Exception as e:
-            logging.error(f"   ❌ Error loading {env_key}: {e}, using defaults")
+            self._handle_error(f"   ❌ خطأ في تحميل {env_key}", e)
             return [s.strip() for s in default_signals.split(',') if s.strip()]
 
-    def setup_keywords(self):
-        """🎯 إعداد الكلمات المفتاحية - للتوافق فقط ولكن لا تستخدم"""
-        # 🚨 هذه الكلمات لا تستخدم في التصنيف بعد الآن
+    def setup_keywords(self) -> None:
+        """إعداد الكلمات المفتاحية"""
         bullish_kw = os.getenv('BULLISH_KEYWORDS', '')
         bearish_kw = os.getenv('BEARISH_KEYWORDS', '')
         trend_kw = os.getenv('TREND_KEYWORDS', '')
         trend_confirm_kw = os.getenv('TREND_CONFIRM_KEYWORDS', '')
         exit_kw = os.getenv('EXIT_KEYWORDS', '')
         group3_kw = os.getenv('GROUP3_KEYWORDS', '')
+        group4_kw = os.getenv('GROUP4_KEYWORDS', '')
+        group5_kw = os.getenv('GROUP5_KEYWORDS', '')
 
         self.keywords = {
             'bullish': [kw.strip() for kw in bullish_kw.split(',') if kw.strip()],
@@ -302,16 +348,29 @@ class ConfigManager:
             'trend': [kw.strip() for kw in trend_kw.split(',') if kw.strip()],
             'trend_confirm': [kw.strip() for kw in trend_confirm_kw.split(',') if kw.strip()],
             'exit': [kw.strip() for kw in exit_kw.split(',') if kw.strip()],
-            'group3': [kw.strip() for kw in group3_kw.split(',') if kw.strip()]
+            'group3': [kw.strip() for kw in group3_kw.split(',') if kw.strip()],
+            'group4': [kw.strip() for kw in group4_kw.split(',') if kw.strip()],
+            'group5': [kw.strip() for kw in group5_kw.split(',') if kw.strip()]
         }
         
         logging.info("🚨 ملاحظة: نظام الكلمات المفتاحية غير مفعل - التطابق التام فقط")
 
-    def validate_configuration(self):
-        """Validate system configuration"""
+    def validate_configuration(self) -> None:
+        """التحقق من صحة التكوين"""
         logging.info("\n🔍 Validating configuration...")
         
         errors, warnings = ConfigValidator.validate_config(self.config)
+        
+        # 🛠️ الإصلاح: التحقق من أنماط التداول المحددة
+        trading_modes_to_check = [
+            self.config['TRADING_MODE'],
+            self.config['TRADING_MODE1'], 
+            self.config['TRADING_MODE2']
+        ]
+        
+        for mode in trading_modes_to_check:
+            if not self._validate_trading_mode_internal(mode):
+                errors.append(f"❌ نمط تداول غير معروف: {mode}")
         
         if errors or warnings:
             validation_report = ConfigValidator.format_validation_report(errors, warnings)
@@ -325,8 +384,22 @@ class ConfigManager:
         else:
             logging.info("✅ All configuration validations passed")
 
-    def display_config(self):
-        """Display loaded configuration for verification"""
+    def _validate_trading_mode_internal(self, mode: str) -> bool:
+        """التحقق الداخلي من نمط التداول"""
+        if not mode:
+            return False
+            
+        valid_groups = ['GROUP1', 'GROUP2', 'GROUP3', 'GROUP4', 'GROUP5']
+        groups_in_mode = mode.split('_')
+        
+        for group in groups_in_mode:
+            if group not in valid_groups:
+                return False
+                
+        return len(groups_in_mode) > 0
+
+    def display_config(self) -> None:
+        """عرض الإعدادات المحملة للتحقق"""
         logging.info("\n🔧 LOADED CONFIGURATION:")
         logging.info("   📱 Telegram: " + ("✅ ENABLED" if self.config['TELEGRAM_ENABLED'] else "❌ DISABLED"))
         logging.info("   🌐 External Server: " + ("✅ ENABLED" if self.config['EXTERNAL_SERVER_ENABLED'] else "❌ DISABLED"))
@@ -349,14 +422,32 @@ class ConfigManager:
         if self.config['GROUP3_ENABLED']:
             logging.info(f"      • Required Group3: {self.config['REQUIRED_CONFIRMATIONS_GROUP3']}")
         
+        # 🆕 عرض إعدادات المجموعتين الجديدتين
+        logging.info(f"      • Group4 Enabled: {'✅ YES' if self.config['GROUP4_ENABLED'] else '❌ NO'}")
+        if self.config['GROUP4_ENABLED']:
+            logging.info(f"      • Required Group4: {self.config['REQUIRED_CONFIRMATIONS_GROUP4']}")
+        logging.info(f"      • Group5 Enabled: {'✅ YES' if self.config['GROUP5_ENABLED'] else '❌ NO'}")
+        if self.config['GROUP5_ENABLED']:
+            logging.info(f"      • Required Group5: {self.config['REQUIRED_CONFIRMATIONS_GROUP5']}")
+        
         # 🆕 عرض إعداد تخزين الإشارات المخالفة
         logging.info("   🔄 تخزين الإشارات المخالفة: " + ("✅ مفعل" if self.config['STORE_CONTRARIAN_SIGNALS'] else "❌ معطل"))
         
-        # 🆕 عرض إشارات GROUP3 المنفصلة
+        # 🆕 عرض إشارات المجموعات الجديدة
         if self.config['GROUP3_ENABLED']:
             logging.info("   🟢 Group3 Signals:")
             logging.info(f"      • Bullish: {len(self.signals['group3_bullish'])} signals")
             logging.info(f"      • Bearish: {len(self.signals['group3_bearish'])} signals")
+        
+        if self.config['GROUP4_ENABLED']:
+            logging.info("   🟠 Group4 Signals:")
+            logging.info(f"      • Bullish: {len(self.signals['group4_bullish'])} signals")
+            logging.info(f"      • Bearish: {len(self.signals['group4_bearish'])} signals")
+            
+        if self.config['GROUP5_ENABLED']:
+            logging.info("   🟣 Group5 Signals:")
+            logging.info(f"      • Bullish: {len(self.signals['group5_bullish'])} signals")
+            logging.info(f"      • Bearish: {len(self.signals['group5_bearish'])} signals")
         
         # 🆕 عرض إعدادات انتهاء صلاحية الإشارات
         logging.info("   ⏰ Signal Expiration Settings:")
@@ -367,3 +458,11 @@ class ConfigManager:
         logging.info("      • Entry Messages: " + ("✅ ON" if self.config['SEND_ENTRY_MESSAGES'] else "❌ OFF"))
         logging.info("      • Exit Messages: " + ("✅ ON" if self.config['SEND_EXIT_MESSAGES'] else "❌ OFF"))
         logging.info(f"   🌐 Server Port: {self.port}")
+
+    def get_error_log(self) -> List[str]:
+        """الحصول على سجل الأخطاء"""
+        return self._error_log.copy()
+
+    def clear_error_log(self) -> None:
+        """مسح سجل الأخطاء"""
+        self._error_log.clear()

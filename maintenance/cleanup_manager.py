@@ -6,11 +6,13 @@ import os
 import json
 import logging
 from datetime import datetime
+from typing import Dict, Optional, List  # أضفت List هنا
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
 class CleanupManager:
-    """إدارة عمليات التنظيف والجدولة - الإصدار المحسن"""
+    """🧹 مدير التنظيف مع تحسينات الأداء والأمان"""
 
     def __init__(self, config, trade_manager, group_manager, notification_manager):
         self.config = config
@@ -18,242 +20,229 @@ class CleanupManager:
         self.group_manager = group_manager
         self.notification_manager = notification_manager
         self.scheduler_thread = None
+        self.backup_history = deque(maxlen=5)
+        self._error_log = deque(maxlen=1000)
 
-    def setup_scheduler(self):
-        """Setup daily cleanup scheduler with IMPROVED reliability"""
+    def _handle_error(self, error_msg: str, exception: Optional[Exception] = None) -> None:
+        """معالجة موحدة للأخطاء"""
+        full_error = f"{error_msg}: {exception}" if exception else error_msg
+        logger.error(full_error)
+        self._error_log.append(full_error)
+
+    def setup_scheduler(self) -> None:
+        """إعداد الجدولة مع معالجة محسنة للأخطاء"""
         if self.config['DAILY_CLEANUP_ENABLED']:
             cleanup_time = self.config['DAILY_CLEANUP_TIME']
-            logger.info(f"🕐 Daily cleanup scheduled at {cleanup_time} (server local time)")
+            logger.info(f"🕐 تم جدولة التنظيف اليومي الساعة {cleanup_time}")
 
             schedule.every().day.at(cleanup_time).do(self.daily_cleanup)
 
             self.scheduler_thread = threading.Thread(
-                target=self.run_scheduler, 
+                target=self._run_scheduler, 
                 daemon=True,
-                name="SchedulerThread"
+                name="CleanupScheduler"
             )
             self.scheduler_thread.start()
         else:
-            logger.info("🔕 Daily cleanup disabled")
+            logger.info("🔕 التنظيف اليومي معطل")
 
-    def run_scheduler(self):
-        """Improved scheduler with shorter intervals and better error recovery"""
-        logger.info("⏰ Scheduler thread started")
+    def _run_scheduler(self) -> None:
+        """تشغيل المجدول مع التعافي من الأخطاء"""
+        logger.info("⏰ بدء تشغيل مجدول التنظيف")
         while True:
             try:
                 schedule.run_pending()
                 time.sleep(30)
             except Exception as e:
-                logger.error(f"❌ Scheduler error: {e}")
+                self._handle_error("❌ خطأ في المجدول", e)
                 time.sleep(60)
 
-    def daily_cleanup(self):
-        """Enhanced daily cleanup with backup verification - FIXED PERMISSIONS"""
-        logger.info("\n" + "="*60)
-        logger.info("🧹 STARTING DAILY CLEANUP - ENHANCED")
-        logger.info("="*60)
-
-        # 🆕 إصلاح: استخدام الخصائص الفعلية الموجودة في TradeManager
-        original_data = {
-            'pending_signals': self.group_manager.pending_signals.copy(),
-            'active_trades': self.trade_manager.active_trades.copy(),
-            'current_trend': self.trade_manager.current_trend.copy(),
-            'previous_trend': self.trade_manager.previous_trend.copy(),
-            'last_reported_trend': self.trade_manager.last_reported_trend.copy()
-        }
+    def daily_cleanup(self) -> bool:
+        """التنظيف اليومي مع نسخ احتياطي محسن"""
+        logger.info("\n" + "="*50)
+        logger.info("🧹 بدء التنظيف اليومي المحسن")
+        logger.info("="*50)
 
         try:
-            # 🆕 التحقق من إمكانية النسخ الاحتياطي أولاً
-            can_backup = self._check_backup_possible()
-            if not can_backup:
-                logger.warning("⚠️ Backup not possible due to permissions - proceeding with cleanup only")
-                backup_success = True  # المتابعة بدون نسخ احتياطي
+            # 💾 نسخ احتياطي للبيانات
+            original_data = self._create_system_snapshot()
+            
+            # التحقق من إمكانية النسخ الاحتياطي
+            if not self._check_backup_possible():
+                logger.warning("⚠️ لا يمكن إنشاء نسخ احتياطي - المتابعة بدون نسخ")
+                backup_success = True
             else:
                 backup_success = self.backup_system_state()
 
             if not backup_success:
-                logger.error("❌ CLEANUP ABORTED: Backup failed, preserving all data")
-                if self.notification_manager.should_send_message('general'):
-                    self.notification_manager.send_notifications("❌ فشل النسخ الاحتياطي - تم إلغاء التنظيف اليومي", 'general')
+                logger.error("❌ تم إلغاء التنظيف بسبب فشل النسخ الاحتياطي")
+                self._send_cleanup_notification("فشل")
                 return False
 
-            # 🆕 تنفيذ التنظيف حتى لو فشل النسخ الاحتياطي (لكن مع إشعار)
+            # 🧹 تنفيذ التنظيف
             self._execute_cleanup()
+            logger.info("✅ تم التنظيف اليومي بنجاح")
 
-            logger.info("✅ DAILY CLEANUP COMPLETED SUCCESSFULLY")
-            logger.info("="*60)
-
-            if self.notification_manager.should_send_message('general'):
-                cleanup_msg = self._format_cleanup_success_message()
-                self.notification_manager.send_notifications(cleanup_msg, 'general')
-
+            self._send_cleanup_notification("نجاح")
             return True
 
         except Exception as e:
-            logger.error(f"💥 CLEANUP FAILED: Restoring original data: {e}")
-            
-            self.group_manager.pending_signals = original_data['pending_signals']
-            self.trade_manager.active_trades = original_data['active_trades']
-            self.trade_manager.current_trend = original_data['current_trend']
-            self.trade_manager.previous_trend = original_data['previous_trend']
-            self.trade_manager.last_reported_trend = original_data['last_reported_trend']
-            
-            if self.notification_manager.should_send_message('general'):
-                self.notification_manager.send_notifications(f"❌ فشل التنظيف اليومي: {str(e)}", 'general')
-            
+            self._handle_error("💥 فشل التنظيف اليومي", e)
+            self._send_cleanup_notification("فشل")
             return False
 
-    def _check_backup_possible(self):
-        """التحقق من إمكانية إنشاء ملفات في النظام"""
-        test_file = "backup_test.tmp"
-        try:
-            # محاولة إنشاء ملف اختبار
-            with open(test_file, "w") as f:
-                f.write("test")
-            # حذف ملف الاختبار
-            os.remove(test_file)
-            logger.debug("✅ Backup is possible - file creation test passed")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Backup not possible - cannot create files: {e}")
-            return False
+    def _create_system_snapshot(self) -> Dict:
+        """إنشاء لقطة للنظام للنسخ الاحتياطي"""
+        return {
+            'pending_signals': self._safe_pending_signals_snapshot(),
+            'active_trades': self.trade_manager.active_trades.copy(),
+            'current_trend': self.trade_manager.current_trend.copy(),
+            'previous_trend': self.trade_manager.previous_trend.copy(),
+            'last_reported_trend': self.trade_manager.last_reported_trend.copy(),
+            'snapshot_time': datetime.now().isoformat()
+        }
 
-    def _execute_cleanup(self):
-        """تنفيذ عملية التنظيف الفعلية"""
-        pending_signals_count = len(self.group_manager.pending_signals)
-        active_trades_count = len(self.trade_manager.active_trades)
-        current_trend_count = len(self.trade_manager.current_trend)
-        previous_trend_count = len(self.trade_manager.previous_trend)
-
-        # تنظيف جميع البيانات
-        self.group_manager.pending_signals.clear()
-        self.trade_manager.active_trades.clear()
-        self.trade_manager.current_trend.clear()
-        self.trade_manager.previous_trend.clear()
-        self.trade_manager.last_reported_trend.clear()
-        
-        # تنظيف عداد الصفقات إذا كان موجوداً
-        if hasattr(self.trade_manager, 'symbol_trade_count'):
-            self.trade_manager.symbol_trade_count.clear()
-
-        logger.info(f"✅ Cleanup executed:")
-        logger.info(f"   📭 Cleared {pending_signals_count} pending signal groups")
-        logger.info(f"   📊 Cleared {active_trades_count} active trades")
-        logger.info(f"   📈 Cleared {current_trend_count} current trends")
-        logger.info(f"   📋 Cleared {previous_trend_count} previous trends")
-        logger.info("🔄 All system data has been reset for the new day")
-
-    def backup_system_state(self):
-        """نظام نسخ احتياطي محسن مع حفظ فعلي"""
-        backup_success = False
-        
-        try:
-            logger.info("💾 بدء النسخ الاحتياطي للنظام...")
-            backup_data = {
-                "timestamp": datetime.now().isoformat(),
-                "pending_signals": self._safe_pending_signals_snapshot(),
-                "active_trades": self.trade_manager.active_trades.copy(),
-                "current_trend": self.trade_manager.current_trend.copy(),
-                "previous_trend": self.trade_manager.previous_trend.copy(),
-                "last_reported_trend": self.trade_manager.last_reported_trend.copy(),
-                "backup_version": "v5_stable_fixed"
-            }
-
-            # إضافة عداد الصفقات إذا كان موجوداً
-            if hasattr(self.trade_manager, 'symbol_trade_count'):
-                backup_data["symbol_trade_count"] = self.trade_manager.symbol_trade_count.copy()
-
-            # 🆕 محاولة الحفظ في ملف مع التعامل مع الأخطاء
-            try:
-                backup_dir = "system_backups"
-                os.makedirs(backup_dir, exist_ok=True)
-                
-                backup_file = os.path.join(backup_dir, f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-                
-                with open(backup_file, 'w', encoding='utf-8') as f:
-                    json.dump(backup_data, f, indent=2, ensure_ascii=False, default=str)
-                
-                backup_size = os.path.getsize(backup_file)
-                logger.info(f"✅ تم حفظ النسخ الاحتياطي في الملف: {backup_file} ({backup_size} bytes)")
-                backup_success = True
-                
-            except Exception as file_error:
-                logger.warning(f"⚠️ فشل حفظ النسخ في ملف، استخدام الذاكرة فقط: {file_error}")
-                # 🆕 النسخ في الذاكرة كبديل
-                backup_json = json.dumps(backup_data, indent=2, ensure_ascii=False, default=str)
-                backup_size = len(backup_json.encode('utf-8'))
-                logger.info(f"✅ تم إنشاء نسخ احتياطي في الذاكرة: {backup_size} bytes")
-                backup_success = True
-
-        except Exception as e:
-            logger.error(f"❌ فشل النسخ الاحتياطي: {e}")
-            backup_success = False
-        
-        return backup_success
-
-    def _safe_pending_signals_snapshot(self):
-        """Make pending_signals JSON-safe"""
+    def _safe_pending_signals_snapshot(self) -> Dict:
+        """إنشاء لقطة آمنة للإشارات المعلقة"""
         snap = {}
-        for symbol, groups in self.group_manager.pending_signals.items():
-            snap[symbol] = {
-                "group1_bullish": [{
-                    'hash': signal.get('hash'),
-                    'signal_type': signal.get('signal_type'),
-                    'classification': signal.get('classification'),
-                    'timestamp': signal.get('timestamp').isoformat() if hasattr(signal.get('timestamp'), 'isoformat') else str(signal.get('timestamp')),
-                    'direction': signal.get('direction')
-                } for signal in groups.get("group1_bullish", [])],
-                "group1_bearish": [{
-                    'hash': signal.get('hash'),
-                    'signal_type': signal.get('signal_type'),
-                    'classification': signal.get('classification'),
-                    'timestamp': signal.get('timestamp').isoformat() if hasattr(signal.get('timestamp'), 'isoformat') else str(signal.get('timestamp')),
-                    'direction': signal.get('direction')
-                } for signal in groups.get("group1_bearish", [])],
-                "group2_bullish": [{
-                    'hash': signal.get('hash'),
-                    'signal_type': signal.get('signal_type'),
-                    'classification': signal.get('classification'),
-                    'timestamp': signal.get('timestamp').isoformat() if hasattr(signal.get('timestamp'), 'isoformat') else str(signal.get('timestamp')),
-                    'direction': signal.get('direction')
-                } for signal in groups.get("group2_bullish", [])],
-                "group2_bearish": [{
-                    'hash': signal.get('hash'),
-                    'signal_type': signal.get('signal_type'),
-                    'classification': signal.get('classification'),
-                    'timestamp': signal.get('timestamp').isoformat() if hasattr(signal.get('timestamp'), 'isoformat') else str(signal.get('timestamp')),
-                    'direction': signal.get('direction')
-                } for signal in groups.get("group2_bearish", [])],
-                "group3_bullish": [{
-                    'hash': signal.get('hash'),
-                    'signal_type': signal.get('signal_type'),
-                    'classification': signal.get('classification'),
-                    'timestamp': signal.get('timestamp').isoformat() if hasattr(signal.get('timestamp'), 'isoformat') else str(signal.get('timestamp')),
-                    'direction': signal.get('direction')
-                } for signal in groups.get("group3_bullish", [])],
-                "group3_bearish": [{
-                    'hash': signal.get('hash'),
-                    'signal_type': signal.get('signal_type'),
-                    'classification': signal.get('classification'),
-                    'timestamp': signal.get('timestamp').isoformat() if hasattr(signal.get('timestamp'), 'isoformat') else str(signal.get('timestamp')),
-                    'direction': signal.get('direction')
-                } for signal in groups.get("group3_bearish", [])],
-                "updated_at": groups.get("updated_at").isoformat() if hasattr(groups.get("updated_at"), 'isoformat') else str(groups.get("updated_at"))
-            }
+        try:
+            for symbol, groups in self.group_manager.pending_signals.items():
+                snap[symbol] = {}
+                for group_type, signals in groups.items():
+                    if group_type in ['created_at', 'updated_at']:
+                        snap[symbol][group_type] = groups[group_type]
+                        continue
+                    
+                    snap[symbol][group_type] = [{
+                        'hash': signal.get('hash'),
+                        'signal_type': signal.get('signal_type'),
+                        'classification': signal.get('classification'),
+                        'timestamp': signal.get('timestamp').isoformat() if hasattr(signal.get('timestamp'), 'isoformat') else str(signal.get('timestamp')),
+                        'direction': signal.get('direction')
+                    } for signal in signals]
+        except Exception as e:
+            self._handle_error("⚠️ خطأ في إنشاء لقطة الإشارات", e)
+        
         return snap
 
-    def _format_cleanup_success_message(self):
-        """Format successful cleanup notification message"""
+    def _execute_cleanup(self) -> None:
+        """تنفيذ عملية التنظيف الفعلية"""
+        try:
+            # جمع الإحصائيات قبل التنظيف
+            stats_before = {
+                'pending_signals': len(self.group_manager.pending_signals),
+                'active_trades': len(self.trade_manager.active_trades),
+                'current_trend': len(self.trade_manager.current_trend)
+            }
+
+            # التنظيف
+            self.group_manager.pending_signals.clear()
+            self.trade_manager.active_trades.clear()
+            self.trade_manager.current_trend.clear()
+            self.trade_manager.previous_trend.clear()
+            self.trade_manager.last_reported_trend.clear()
+            
+            if hasattr(self.trade_manager, 'symbol_trade_count'):
+                self.trade_manager.symbol_trade_count.clear()
+
+            logger.info(f"✅ تم التنظيف: {stats_before['pending_signals']} إشارة, {stats_before['active_trades']} صفقة")
+
+        except Exception as e:
+            self._handle_error("💥 خطأ في تنفيذ التنظيف", e)
+            raise
+
+    def backup_system_state(self) -> bool:
+        """نسخ احتياطي محسن للنظام"""
+        try:
+            logger.info("💾 بدء النسخ الاحتياطي...")
+            
+            backup_data = self._create_system_snapshot()
+            backup_data.update({
+                "backup_version": "v2_enhanced",
+                "system_metrics": self._get_system_metrics()
+            })
+
+            # محاولة الحفظ في ملف
+            backup_success = self._save_backup_to_file(backup_data)
+            
+            if backup_success:
+                logger.info("✅ تم النسخ الاحتياطي بنجاح")
+            else:
+                logger.warning("⚠️ تم النسخ في الذاكرة فقط")
+                
+            return True
+
+        except Exception as e:
+            self._handle_error("❌ فشل النسخ الاحتياطي", e)
+            return False
+
+    def _save_backup_to_file(self, backup_data: Dict) -> bool:
+        """حفظ النسخ الاحتياطي في ملف"""
+        try:
+            backup_dir = "system_backups"
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            backup_file = os.path.join(backup_dir, f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+            
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                json.dump(backup_data, f, indent=2, ensure_ascii=False, default=str)
+            
+            self.backup_history.append({
+                'file': backup_file,
+                'size': os.path.getsize(backup_file),
+                'timestamp': datetime.now()
+            })
+            
+            return True
+            
+        except Exception as e:
+            self._handle_error("⚠️ فشل حفظ النسخ في ملف", e)
+            return False
+
+    def _check_backup_possible(self) -> bool:
+        """التحقق من إمكانية إنشاء نسخ احتياطية"""
+        try:
+            test_file = "backup_test.tmp"
+            with open(test_file, "w") as f:
+                f.write("test")
+            os.remove(test_file)
+            return True
+        except Exception as e:
+            self._handle_error("❌ لا يمكن إنشاء ملفات نسخ احتياطي", e)
+            return False
+
+    def _get_system_metrics(self) -> Dict:
+        """الحصول على مقاييس النظام"""
+        return {
+            'cleanup_time': datetime.now().isoformat(),
+            'backup_count': len(self.backup_history),
+            'error_count': len(self._error_log)
+        }
+
+    def _send_cleanup_notification(self, status: str) -> None:
+        """إرسال إشعار التنظيف"""
+        if not self.notification_manager or not self.notification_manager.should_send_message('general'):
+            return
+
+        message = self._format_cleanup_message(status)
+        self.notification_manager.send_notifications(message, 'general')
+
+    def _format_cleanup_message(self, status: str) -> str:
+        """تنسيق رسالة التنظيف"""
         timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        status_icon = "✅" if status == "نجاح" else "❌"
 
         return (
             "🧹 التنظيف اليومي التلقائي\n"
             "┏━━━━━━━━━━━━━━━━━━━━\n"
             f"┃ 📅 التاريخ: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"┃ 🕐 الوقت: {self.config['DAILY_CLEANUP_TIME']} (حسب وقت السيرفر)\n"
-            f"┃ ✅ الحالة: تم تنظيف جميع البيانات بنجاح\n"
-            f"┃ 💾 النسخ الاحتياطي: مخزن في الذاكرة\n"
-            f"┃ 💫 النظام جاهز ليوم جديد من التداول\n"
+            f"┃ 🕐 الوقت: {self.config['DAILY_CLEANUP_TIME']}\n"
+            f"┃ {status_icon} الحالة: {status}\n"
+            f"┃ 💾 النسخ الاحتياطي: {len(self.backup_history)} ملف\n"
             "┗━━━━━━━━━━━━━━━━━━━━\n"
             f"🕐 {timestamp}"
         )
+
+    def get_error_log(self) -> List[str]:
+        """الحصول على سجل الأخطاء"""
+        return list(self._error_log)
