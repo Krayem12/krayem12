@@ -68,34 +68,52 @@ class SignalProcessor:
 
     @lru_cache(maxsize=1000)
     def _classify_signal_text(self, signal_text: str) -> str:
-        """تصنيف نص الإشارة مع التخزين المؤقت"""
-        # البحث في الفهرس أولاً للأداء
-        if signal_text in self.signal_index:
-            category = self.signal_index[signal_text]
-            logger.debug(f"   ✅ تم العثور على الإشارة في الفهرس: {signal_text} -> {category}")
-            return category
-
-        # البحث في القوائم المحددة
-        for category, signal_list in self.signals.items():
-            normalized_signals = [s.lower().strip() for s in signal_list]
-            if signal_text in normalized_signals:
-                # تحديث الفهرس للاستخدام المستقبلي
-                self.signal_index[signal_text] = category
-                logger.debug(f"   ✅ تم العثور على الإشارة في القوائم: {signal_text} -> {category}")
+        """تصنيف نص الإشارة مع التخزين المؤقت وتحسينات"""
+        try:
+            # تنظيف النص أولاً
+            cleaned_signal = signal_text.lower().strip()
+            
+            logger.debug(f"🔍 تصنيف الإشارة المنظفة: '{cleaned_signal}'")
+            
+            # البحث في الفهرس أولاً للأداء
+            if cleaned_signal in self.signal_index:
+                category = self.signal_index[cleaned_signal]
+                logger.debug(f"   ✅ تم العثور على الإشارة في الفهرس: {cleaned_signal} -> {category}")
                 return category
 
-        # 🆕 تسجيل تفصيلي للإشارات غير المعروفة
-        logger.warning(f"❌ نوع إشارة غير معروف: '{signal_text}'")
-        
-        # 🆕 تسجيل جميع الإشارات المتاحة للمساعدة في التصحيح
-        available_signals = []
-        for cat, sig_list in self.signals.items():
-            if sig_list:
-                available_signals.extend([f"{sig}->{cat}" for sig in sig_list[:2]])  # أول إشارتين من كل فئة
-        
-        logger.debug(f"📋 الإشارات المتاحة: {', '.join(available_signals[:10])}{'...' if len(available_signals) > 10 else ''}")
-        
-        return 'unknown'
+            # البحث في القوائم المحددة
+            for category, signal_list in self.signals.items():
+                normalized_signals = [s.lower().strip() for s in signal_list]
+                if cleaned_signal in normalized_signals:
+                    # تحديث الفهرس للاستخدام المستقبلي
+                    self.signal_index[cleaned_signal] = category
+                    logger.debug(f"   ✅ تم العثور على الإشارة في القوائم: {cleaned_signal} -> {category}")
+                    return category
+
+            # 🆕 محاولة البحث الجزئي للإشارات الطويلة
+            for category, signal_list in self.signals.items():
+                for signal in signal_list:
+                    if cleaned_signal in signal.lower():
+                        self.signal_index[cleaned_signal] = category
+                        logger.debug(f"   ✅ تم العثور على الإشارة بالبحث الجزئي: {cleaned_signal} -> {category}")
+                        return category
+
+            # 🆕 تسجيل تفصيلي للإشارات غير المعروفة
+            logger.warning(f"❌ نوع إشارة غير معروف: '{cleaned_signal}'")
+            
+            # 🆕 تسجيل جميع الإشارات المتاحة للمساعدة في التصحيح
+            available_signals = []
+            for cat, sig_list in self.signals.items():
+                if sig_list:
+                    available_signals.extend([f"{sig}->{cat}" for sig in sig_list[:2]])
+            
+            logger.debug(f"📋 الإشارات المتاحة: {', '.join(available_signals[:10])}{'...' if len(available_signals) > 10 else ''}")
+            
+            return 'unknown'
+            
+        except Exception as e:
+            logger.error(f"💥 خطأ في التصنيف: {e}")
+            return 'unknown'
 
     def safe_classify_signal(self, signal_data: Dict) -> str:
         """تصنيف آمن مع معالجة الأخطاء"""
