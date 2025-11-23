@@ -7,11 +7,12 @@ import logging
 from datetime import datetime
 from typing import Dict, Optional, List
 from collections import deque
+from utils.time_utils import saudi_time  # ✅ تم الإضافة
 
 logger = logging.getLogger(__name__)
 
 class CleanupManager:
-    """🧹 مدير التنظيف بدون قيم افتراضية"""
+    """🧹 مدير التنظيف بالتوقيت السعودي"""
 
     def __init__(self, config, trade_manager, group_manager, notification_manager):
         self.config = config
@@ -24,6 +25,7 @@ class CleanupManager:
         
         # 🛠️ التحقق من التهيئة
         logger.debug(f"🔧 تهيئة CleanupManager - EXTERNAL_SERVER_ENABLED: {self.config.get('EXTERNAL_SERVER_ENABLED')}")
+        logger.info(f"🧹 تم تهيئة مدير التنظيف بالتوقيت السعودي - وقت التنظيف: {self.config['DAILY_CLEANUP_TIME']} 🇸🇦")  # ✅ تم التعديل
 
     def _handle_error(self, error_msg: str, exception: Optional[Exception] = None) -> None:
         """معالجة موحدة للأخطاء"""
@@ -32,10 +34,10 @@ class CleanupManager:
         self._error_log.append(full_error)
 
     def setup_scheduler(self) -> None:
-        """إعداد الجدولة مع معالجة محسنة للأخطاء"""
+        """إعداد الجدولة مع معالجة محسنة للأخطاء بالتوقيت السعودي"""
         if self.config['DAILY_CLEANUP_ENABLED']:
             cleanup_time = self.config['DAILY_CLEANUP_TIME']
-            logger.info(f"🕐 تم جدولة التنظيف اليومي الساعة {cleanup_time}")
+            logger.info(f"🕐 تم جدولة التنظيف اليومي الساعة {cleanup_time} بالتوقيت السعودي 🇸🇦")  # ✅ تم التعديل
 
             schedule.every().day.at(cleanup_time).do(self.daily_cleanup)
 
@@ -50,7 +52,7 @@ class CleanupManager:
 
     def _run_scheduler(self) -> None:
         """تشغيل المجدول مع التعافي من الأخطاء"""
-        logger.info("⏰ بدء تشغيل مجدول التنظيف")
+        logger.info("⏰ بدء تشغيل مجدول التنظيف بالتوقيت السعودي 🇸🇦")  # ✅ تم التعديل
         while True:
             try:
                 schedule.run_pending()
@@ -60,9 +62,10 @@ class CleanupManager:
                 time.sleep(60)
 
     def daily_cleanup(self) -> bool:
-        """التنظيف اليومي مع نسخ احتياطي محسن"""
+        """التنظيف اليومي مع نسخ احتياطي محسن بالتوقيت السعودي"""
+        current_time = saudi_time.format_time()  # ✅ تم التعديل
         logger.info("\n" + "="*50)
-        logger.info("🧹 بدء التنظيف اليومي المحسن")
+        logger.info(f"🧹 بدء التنظيف اليومي المحسن - التوقيت: {current_time} 🇸🇦")  # ✅ تم التعديل
         logger.info("="*50)
 
         try:
@@ -94,18 +97,19 @@ class CleanupManager:
             return False
 
     def _create_system_snapshot(self) -> Dict:
-        """إنشاء لقطة للنظام للنسخ الاحتياطي"""
+        """إنشاء لقطة للنظام للنسخ الاحتياطي بالتوقيت السعودي"""
         return {
             'pending_signals': self._safe_pending_signals_snapshot(),
             'active_trades': self.trade_manager.active_trades.copy(),
             'current_trend': self.trade_manager.current_trend.copy(),
             'previous_trend': self.trade_manager.previous_trend.copy(),
             'last_reported_trend': self.trade_manager.last_reported_trend.copy(),
-            'snapshot_time': datetime.now().isoformat()
+            'snapshot_time': saudi_time.now().isoformat(),  # ✅ تم التعديل
+            'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
         }
 
     def _safe_pending_signals_snapshot(self) -> Dict:
-        """إنشاء لقطة آمنة للإشارات المعلقة"""
+        """إنشاء لقطة آمنة للإشارات المعلقة بالتوقيت السعودي"""
         snap = {}
         try:
             for symbol, groups in self.group_manager.pending_signals.items():
@@ -120,7 +124,8 @@ class CleanupManager:
                         'signal_type': signal.get('signal_type'),
                         'classification': signal.get('classification'),
                         'timestamp': signal.get('timestamp').isoformat() if hasattr(signal.get('timestamp'), 'isoformat') else str(signal.get('timestamp')),
-                        'direction': signal.get('direction')
+                        'direction': signal.get('direction'),
+                        'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
                     } for signal in signals]
         except Exception as e:
             self._handle_error("⚠️ خطأ في إنشاء لقطة الإشارات", e)
@@ -144,6 +149,7 @@ class CleanupManager:
             self.trade_manager.previous_trend.clear()
             self.trade_manager.last_reported_trend.clear()
             
+            # ✅ التحقق من وجود المتغير قبل مسحه
             if hasattr(self.trade_manager, 'symbol_trade_count'):
                 self.trade_manager.symbol_trade_count.clear()
 
@@ -154,13 +160,13 @@ class CleanupManager:
             raise
 
     def backup_system_state(self) -> bool:
-        """نسخ احتياطي محسن للنظام"""
+        """نسخ احتياطي محسن للنظام بالتوقيت السعودي"""
         try:
-            logger.info("💾 بدء النسخ الاحتياطي...")
+            logger.info("💾 بدء النسخ الاحتياطي بالتوقيت السعودي...")  # ✅ تم التعديل
             
             backup_data = self._create_system_snapshot()
             backup_data.update({
-                "backup_version": "v2_enhanced",
+                "backup_version": "v2_enhanced_saudi_time",  # ✅ تم التعديل
                 "system_metrics": self._get_system_metrics()
             })
 
@@ -179,12 +185,13 @@ class CleanupManager:
             return False
 
     def _save_backup_to_file(self, backup_data: Dict) -> bool:
-        """حفظ النسخ الاحتياطي في ملف"""
+        """حفظ النسخ الاحتياطي في ملف بالتوقيت السعودي"""
         try:
             backup_dir = "system_backups"
             os.makedirs(backup_dir, exist_ok=True)
             
-            backup_file = os.path.join(backup_dir, f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+            # استخدام التوقيت السعودي في اسم الملف  # ✅ تم التعديل
+            backup_file = os.path.join(backup_dir, f"backup_{saudi_time.now().strftime('%Y%m%d_%H%M%S')}.json")
             
             with open(backup_file, 'w', encoding='utf-8') as f:
                 json.dump(backup_data, f, indent=2, ensure_ascii=False, default=str)
@@ -192,7 +199,8 @@ class CleanupManager:
             self.backup_history.append({
                 'file': backup_file,
                 'size': os.path.getsize(backup_file),
-                'timestamp': datetime.now()
+                'timestamp': saudi_time.now(),  # ✅ تم التعديل
+                'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
             })
             
             return True
@@ -214,9 +222,10 @@ class CleanupManager:
             return False
 
     def _get_system_metrics(self) -> Dict:
-        """الحصول على مقاييس النظام"""
+        """الحصول على مقاييس النظام بالتوقيت السعودي"""
         return {
-            'cleanup_time': datetime.now().isoformat(),
+            'cleanup_time': saudi_time.now().isoformat(),  # ✅ تم التعديل
+            'timezone': 'Asia/Riyadh 🇸🇦',  # ✅ تم الإضافة
             'backup_count': len(self.backup_history),
             'error_count': len(self._error_log)
         }
@@ -244,19 +253,19 @@ class CleanupManager:
         logger.info(f"📤 إشعار التنظيف: {'✅ تم الإرسال' if success else '❌ فشل الإرسال'}")
 
     def _format_cleanup_message(self, status: str) -> str:
-        """تنسيق رسالة التنظيف"""
-        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        """تنسيق رسالة التنظيف بالتوقيت السعودي"""
+        timestamp = saudi_time.format_time()  # ✅ تم التعديل
         status_icon = "✅" if status == "نجاح" else "❌"
 
         return (
             "🧹 التنظيف اليومي التلقائي\n"
             "┏━━━━━━━━━━━━━━━━━━━━\n"
-            f"┃ 📅 التاريخ: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"┃ 🕐 الوقت: {self.config['DAILY_CLEANUP_TIME']}\n"
+            f"┃ 📅 التاريخ: {saudi_time.now().strftime('%Y-%m-%d')}\n"  # ✅ تم التعديل
+            f"┃ 🕐 الوقت: {self.config['DAILY_CLEANUP_TIME']} 🇸🇦\n"  # ✅ تم التعديل
             f"┃ {status_icon} الحالة: {status}\n"
             f"┃ 💾 النسخ الاحتياطي: {len(self.backup_history)} ملف\n"
             "┗━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕐 {timestamp}"
+            f"🕐 {timestamp} 🇸🇦"  # ✅ تم التعديل
         )
 
     def get_error_log(self) -> List[str]:

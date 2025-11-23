@@ -3,12 +3,13 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import threading
 from collections import defaultdict, deque
+from utils.time_utils import saudi_time  # ✅ تم الإضافة
 
 logger = logging.getLogger(__name__)
 
 class TradeManager:
     """
-    🎯 نظام اتجاه محسّن - بدون قيم افتراضية
+    🎯 نظام اتجاه محسّن - بالتوقيت السعودي
     """
 
     def __init__(self, config):
@@ -25,6 +26,7 @@ class TradeManager:
 
         # Trend state
         self.current_trend = {}
+        self.previous_trend = {}  # ✅ تم الإضافة
         self.last_reported_trend = {}
         self.trend_strength = {}
         self.trend_signals_count = defaultdict(int)
@@ -37,7 +39,7 @@ class TradeManager:
         self.notification_manager = None
         self._error_log = []
 
-        logger.info("🎯 TradeManager Loaded: Enhanced Trend System")
+        logger.info("🎯 TradeManager Loaded: Enhanced Trend System - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
 
     def set_group_manager(self, gm):
         self.group_manager = gm
@@ -64,9 +66,9 @@ class TradeManager:
                     logger.warning(f"🚫 وصل الحد الأقصى للصفقات للرمز {symbol}: {current_symbol_count}/{max_per_symbol}")
                     return False
 
-                # إنشاء معرف فريد للصفقة
+                # إنشاء معرف فريد للصفقة بالتوقيت السعودي
                 self.total_trade_counter += 1
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+                timestamp = saudi_time.now().strftime('%Y%m%d_%H%M%S_%f')  # ✅ تم التعديل
                 trade_id = f"{symbol}_{mode_key}_{self.total_trade_counter}_{timestamp}"
 
                 # تسجيل الصفقة
@@ -76,15 +78,16 @@ class TradeManager:
                     "strategy_type": strategy_type,
                     "mode_key": mode_key,
                     "trade_type": self._get_trade_type(mode_key),
-                    "opened_at": datetime.now().isoformat(),
+                    "opened_at": saudi_time.now().isoformat(),  # ✅ تم التعديل
                     "trade_id": trade_id,
+                    "timezone": "Asia/Riyadh 🇸🇦"  # ✅ تم الإضافة
                 }
 
                 # 🔴 تحديث العداد بدقة
                 self.symbol_trade_count[symbol] = current_symbol_count + 1
                 self.metrics["trades_opened"] += 1
 
-                logger.info(f"✅ فتح صفقة: {symbol} - {direction} - {strategy_type} (العدد: {self.symbol_trade_count[symbol]})")
+                logger.info(f"✅ فتح صفقة: {symbol} - {direction} - {strategy_type} (العدد: {self.symbol_trade_count[symbol]}) - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
                 return True
 
             except Exception as e:
@@ -109,7 +112,7 @@ class TradeManager:
                     
                 self.metrics["trades_closed"] += 1
 
-                logger.info(f"❎ إغلاق الصفقة: {trade_id}")
+                logger.info(f"❎ إغلاق الصفقة: {trade_id} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
                 return True
 
             except Exception as e:
@@ -130,14 +133,14 @@ class TradeManager:
                     if self.close_trade(trade_id):
                         closed_count += 1
                         
-                logger.info(f"🚪 تم إغلاق {closed_count} صفقة لـ {symbol} بناءً على إشارة خروج: {signal_type}")
+                logger.info(f"🚪 تم إغلاق {closed_count} صفقة لـ {symbol} بناءً على إشارة خروج: {signal_type} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
                 return closed_count
             except Exception as e:
                 self._handle_error(f"💥 خطأ في معالجة إشارة الخروج لـ {symbol}", e)
                 return 0
 
     def update_trend(self, symbol: str, classification: str, signal_data: Dict):
-        """🎯 نظام اتجاه محسّن ومصحح بالكامل"""
+        """🎯 نظام اتجاه محسّن ومصحح بالكامل بالتوقيت السعودي"""
         try:
             direction = self._determine_trend_direction(classification, signal_data)
             if not direction:
@@ -145,7 +148,7 @@ class TradeManager:
                 return False, "UNKNOWN", []
 
             signal_type = signal_data["signal_type"]
-            logger.info(f"🎯 معالجة إشارة اتجاه: {symbol} -> {direction} ({signal_type})")
+            logger.info(f"🎯 معالجة إشارة اتجاه لـ {symbol}: {signal_data['signal_type']} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
 
             # 🔧 تهيئة المخزن إذا لم يكن موجوداً
             if symbol not in self.trend_pool:
@@ -159,7 +162,7 @@ class TradeManager:
 
             # 🔄 إعادة التعيين إذا كانت الإشارة معاكسة
             if pool["direction"] != direction:
-                logger.info(f"🔄 تغيير اتجاه: {symbol} من {pool['direction']} إلى {direction}")
+                logger.info(f"🔄 تغيير اتجاه: {symbol} من {pool['direction']} إلى {direction} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
                 pool["direction"] = direction
                 pool["signals"] = {}
                 self.trend_signals_count[symbol] = 0
@@ -170,10 +173,11 @@ class TradeManager:
                     "signal_type": signal_type,
                     "direction": direction,
                     "classification": classification,
-                    "timestamp": datetime.now()
+                    "timestamp": saudi_time.now(),  # ✅ تم التعديل
+                    "timezone": "Asia/Riyadh 🇸🇦"  # ✅ تم الإضافة
                 }
                 self.trend_signals_count[symbol] = len(pool["signals"])
-                logger.info(f"➕ إضافة إشارة جديدة: {signal_type} (الإجمالي: {self.trend_signals_count[symbol]})")
+                logger.info(f"➕ إضافة إشارة جديدة: {signal_type} (الإجمالي: {self.trend_signals_count[symbol]}) - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
 
             # ✅ التحقق من اكتمال الاتجاه
             required_signals = self.config['TREND_CHANGE_THRESHOLD']
@@ -188,16 +192,17 @@ class TradeManager:
 
                 # 📝 تسجيل تاريخ الاتجاه
                 self.trend_history[symbol].append({
-                    'timestamp': datetime.now(),
+                    'timestamp': saudi_time.now(),  # ✅ تم التعديل
                     'old_trend': old_trend,
                     'new_trend': new_trend,
-                    'signals_used': [s['signal_type'] for s in used_signals]
+                    'signals_used': [s['signal_type'] for s in used_signals],
+                    'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
                 })
 
                 if trend_changed:
-                    logger.info(f"📈 تغيير اتجاه مكتمل: {symbol} → {new_trend} ({len(used_signals)} إشارات)")
+                    logger.info(f"📈 تغيير اتجاه مكتمل: {symbol} → {new_trend} ({len(used_signals)} إشارات) - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
                 else:
-                    logger.info(f"📊 تأكيد اتجاه: {symbol} → {new_trend} ({len(used_signals)} إشارات)")
+                    logger.info(f"📊 تأكيد اتجاه: {symbol} → {new_trend} ({len(used_signals)} إشارات) - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
 
                 # 🧹 إعادة التعيين بعد اكتمال الاتجاه
                 pool["signals"] = {}
@@ -271,7 +276,7 @@ class TradeManager:
         """إعادة تعيين مخزن الاتجاه"""
         if symbol in self.trend_pool:
             del self.trend_pool[symbol]
-        logger.debug(f"🧹 Reset كامل لاتجاه {symbol}")
+        logger.debug(f"🧹 Reset كامل لاتجاه {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
 
     def close_contrarian_trades(self, symbol, classification):
         """إغلاق الصفقات المخالفة للاتجاه"""
@@ -293,7 +298,7 @@ class TradeManager:
             self.close_trade(trade_id)
         
         if to_close:
-            logger.info(f"🚪 تم إغلاق {len(to_close)} صفقة مخالفة للاتجاه لـ {symbol}")
+            logger.info(f"🚪 تم إغلاق {len(to_close)} صفقة مخالفة للاتجاه لـ {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
 
     # دوال مساعدة محسنة
     def get_active_trades_count(self, symbol: str = None) -> int:
@@ -347,11 +352,12 @@ class TradeManager:
         return trade_types.get(mode_key, "🟦 أساسي")
 
     def _handle_error(self, msg, exc=None):
-        """معالجة الأخطاء"""
+        """معالجة الأخطاء بالتوقيت السعودي"""
         full = f"{msg}: {exc}" if exc else msg
         logger.error(full)
         self._error_log.append({
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': saudi_time.now().isoformat(),  # ✅ تم التعديل
+            'timezone': 'Asia/Riyadh 🇸🇦',  # ✅ تم الإضافة
             'error': full
         })
 
@@ -359,7 +365,7 @@ class TradeManager:
         return self._error_log
 
     def get_trend_status(self, symbol: str) -> Dict:
-        """الحصول على حالة الاتجاه المفصلة"""
+        """الحصول على حالة الاتجاه المفصلة بالتوقيت السعودي"""
         return {
             'symbol': symbol,
             'current_trend': self.current_trend.get(symbol, "UNKNOWN"),
@@ -368,7 +374,8 @@ class TradeManager:
             'signals_count': self.trend_signals_count.get(symbol, 0),
             'trend_pool_size': len(self.trend_pool.get(symbol, {}).get('signals', {})),
             'active_trades': self.get_active_trades_count(symbol),
-            'trend_history_count': len(self.trend_history.get(symbol, []))
+            'trend_history_count': len(self.trend_history.get(symbol, [])),
+            'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
         }
 
     def force_trend_change(self, symbol: str, new_trend: str) -> bool:
@@ -382,7 +389,7 @@ class TradeManager:
             self.current_trend[symbol] = new_trend
             self.last_reported_trend[symbol] = new_trend
             self._reset_trend_pool(symbol)
-            logger.info(f"🔧 تغيير اتجاه قسري: {symbol} {old_trend} → {new_trend}")
+            logger.info(f"🔧 تغيير اتجاه قسري: {symbol} {old_trend} → {new_trend} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
             return True
         except Exception as e:
             self._handle_error(f"💥 خطأ في تغيير الاتجاه القسري لـ {symbol}", e)
@@ -397,7 +404,7 @@ class TradeManager:
         """مسح بيانات الاتجاه لرمز معين"""
         try:
             keys_to_clear = [
-                self.current_trend, self.last_reported_trend, 
+                self.current_trend, self.previous_trend, self.last_reported_trend, 
                 self.trend_strength, self.trend_signals_count,
                 self.trend_pool, self.trend_history
             ]
@@ -406,7 +413,7 @@ class TradeManager:
                 if symbol in data_dict:
                     del data_dict[symbol]
             
-            logger.info(f"🧹 تم مسح جميع بيانات الاتجاه لـ {symbol}")
+            logger.info(f"🧹 تم مسح جميع بيانات الاتجاه لـ {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
             return True
         except Exception as e:
             self._handle_error(f"💥 خطأ في مسح بيانات الاتجاه لـ {symbol}", e)
@@ -420,5 +427,6 @@ class TradeManager:
             'max_per_symbol': self.config["MAX_TRADES_PER_SYMBOL"],
             'total_trades': len(self.active_trades),
             'max_total_trades': self.config["MAX_OPEN_TRADES"],
-            'can_open_more': self.symbol_trade_count.get(symbol, 0) < self.config["MAX_TRADES_PER_SYMBOL"]
+            'can_open_more': self.symbol_trade_count.get(symbol, 0) < self.config["MAX_TRADES_PER_SYMBOL"],
+            'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
         }

@@ -4,17 +4,18 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 from collections import Counter
+from utils.time_utils import saudi_time  # ✅ تم الإضافة
 
 class MessageFormatter:
-    """🎯 فئة متخصصة في تنسيق رسائل النظام - مع دعم عرض إشارات الاتجاه"""
+    """🎯 فئة متخصصة في تنسيق رسائل النظام - مع دعم عرض إشارات الاتجاه والتوقيت السعودي"""
 
     @staticmethod
     def format_detailed_entry_message(symbol, signal_type, direction, current_trend, strategy_type, 
                                     group1_signals, group2_signals, group3_signals, 
                                     group4_signals, group5_signals,
                                     active_for_symbol, total_active, config, mode_key="TRADING_MODE"):
-        """🎯 تنسيق رسالة دخول مفصلة بدون تكرار في الإشارات"""
-        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        """🎯 تنسيق رسالة دخول مفصلة بدون تكرار في الإشارات بالتوقيت السعودي"""
+        timestamp = saudi_time.format_time()  # ✅ تم التعديل
 
         trend_icon = '🟢📈 BULLISH' if str(current_trend).lower() == 'bullish' else '🔴📉 BEARISH'
 
@@ -57,7 +58,7 @@ class MessageFormatter:
             f"┃ 📊 صفقات {symbol}: {active_for_symbol}/{config['MAX_TRADES_PER_SYMBOL']}\n"
             f"┃ 📊 الصفقات الإجمالية: {total_active}/{config['MAX_OPEN_TRADES']}\n"
             "┗━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕐 {timestamp}"
+            f"🕐 {timestamp} 🇸🇦"  # ✅ تم التعديل
         )
 
     @staticmethod
@@ -110,10 +111,10 @@ class MessageFormatter:
 
     @staticmethod
     def format_trend_message(signal_data, new_trend, old_trend, trend_signals=None):
-        """📊 تنسيق رسالة تغيير الاتجاه الأساسية مع عرض جميع الإشارات"""
+        """📊 تنسيق رسالة تغيير الاتجاه الأساسية مع عرض جميع الإشارات بالتوقيت السعودي"""
         symbol = signal_data['symbol']
         signal = signal_data['signal_type']
-        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        timestamp = saudi_time.format_time()  # ✅ تم التعديل
 
         # تحديد الأيقونة والنص بناءً على الاتجاه الجديد
         if new_trend.lower() == 'bullish':
@@ -144,12 +145,12 @@ class MessageFormatter:
 ┃ 📋 الإشارة الحالية: {signal}
 ┃ 🔄 الحالة: {status_text}{signals_display}
 ┗━━━━━━━━━━━━━━━━━━━━
-🕐 {timestamp}"""
+🕐 {timestamp} 🇸🇦"""  # ✅ تم التعديل
 
     @staticmethod
     def format_exit_message(symbol, signal_type, closed_trades, remaining_trades, total_active, config):
-        """🎯 تنسيق رسالة الخروج مع معلومات الصفقات المغلقة"""
-        timestamp = datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
+        """🎯 تنسيق رسالة الخروج مع معلومات الصفقات المغلقة بالتوقيت السعودي"""
+        timestamp = saudi_time.format_time()  # ✅ تم التعديل
 
         return (
             "════ 🚪 إشـــــــارة خــــــروج ════\n"
@@ -160,5 +161,5 @@ class MessageFormatter:
             f"┃ 📊 صفقات {symbol} المتبقية: {remaining_trades}/{config['MAX_TRADES_PER_SYMBOL']}\n"
             f"┃ 📊 الصفقات الإجمالية: {total_active}/{config['MAX_OPEN_TRADES']}\n"
             "┗━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕐 {timestamp}"
+            f"🕐 {timestamp} 🇸🇦"  # ✅ تم التعديل
         )

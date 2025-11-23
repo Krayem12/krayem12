@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from functools import lru_cache
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .validators import ConfigValidator
 
@@ -13,7 +13,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 class ConfigManager:
-    """🎯 مدير الإعدادات بدون أي قيم افتراضية"""
+    """🎯 مدير الإعدادات بدون أي قيم افتراضية - يدعم جميع تجميعات المجموعات"""
 
     def __init__(self):
         self.config = {}
@@ -30,18 +30,65 @@ class ConfigManager:
         self._error_log.append(full_error)
 
     def _validate_required_env_vars(self) -> None:
-        """التحقق من وجود المتغيرات البيئية المطلوبة"""
+        """التحقق من وجود المتغيرات البيئية المطلوبة - محدث لدعم جميع المجموعات"""
         required_vars = [
-            'DEBUG', 'LOG_LEVEL', 'PORT', 'TELEGRAM_ENABLED', 'TELEGRAM_BOT_TOKEN',
-            'TELEGRAM_CHAT_ID', 'EXTERNAL_SERVER_ENABLED', 'EXTERNAL_SERVER_URL',
-            'MAX_OPEN_TRADES', 'MAX_TRADES_PER_SYMBOL', 'TRADING_MODE', 
+            # Basic Settings
+            'DEBUG', 'LOG_LEVEL', 'PORT', 
+            
+            # Telegram Settings
+            'TELEGRAM_ENABLED', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID',
+            
+            # External Server Settings
+            'EXTERNAL_SERVER_ENABLED', 'EXTERNAL_SERVER_URL',
+            
+            # Trade Management Settings
+            'MAX_OPEN_TRADES', 'MAX_TRADES_PER_SYMBOL', 
+            'MAX_TRADES_MODE_MAIN', 'MAX_TRADES_MODE1', 'MAX_TRADES_MODE2',
+            
+            # 🎯 MULTI-MODE Trading Strategy Settings - محدث
+            'TRADING_MODE', 'TRADING_MODE1', 'TRADING_MODE2',
+            'TRADING_MODE1_ENABLED', 'TRADING_MODE2_ENABLED',
+            
+            # Group Settings - محدث ليشمل جميع المجموعات
             'REQUIRED_CONFIRMATIONS_GROUP1', 'GROUP1_TREND_MODE',
-            'TREND_REQUIRED_SIGNALS', 'DAILY_CLEANUP_ENABLED', 'DAILY_CLEANUP_TIME',
-            'SIGNAL_TTL_MINUTES', 'DUPLICATE_SIGNAL_BLOCK_TIME', 'DUPLICATE_CLEANUP_INTERVAL',
+            'GROUP2_ENABLED', 'REQUIRED_CONFIRMATIONS_GROUP2',
+            'GROUP3_ENABLED', 'REQUIRED_CONFIRMATIONS_GROUP3',
+            'GROUP4_ENABLED', 'REQUIRED_CONFIRMATIONS_GROUP4',
+            'GROUP5_ENABLED', 'REQUIRED_CONFIRMATIONS_GROUP5',
+            
+            # 🎯 إعدادات نظام تجميع إشارات الاتجاه
+            'TREND_REQUIRED_SIGNALS',
+            
+            # Trend Settings
             'RESET_TRADES_ON_TREND_CHANGE', 'RESPECT_TREND_FOR_REGULAR_TRADES',
-            'RESPECT_TREND_FOR_GROUP2', 'STORE_CONTRARIAN_SIGNALS',
+            'RESPECT_TREND_FOR_GROUP2',
+            
+            # Signal Storage
+            'STORE_CONTRARIAN_SIGNALS',
+            
+            # Notification Controls
             'SEND_TREND_MESSAGES', 'SEND_ENTRY_MESSAGES', 'SEND_EXIT_MESSAGES',
-            'SEND_CONFIRMATION_MESSAGES', 'SEND_GENERAL_MESSAGES'
+            'SEND_CONFIRMATION_MESSAGES', 'SEND_GENERAL_MESSAGES',
+            
+            # Cleanup Settings
+            'DAILY_CLEANUP_ENABLED', 'DAILY_CLEANUP_TIME', 'SIGNAL_TTL_MINUTES',
+            
+            # 🎯 إعدادات منع التكرار
+            'DUPLICATE_SIGNAL_BLOCK_TIME', 'DUPLICATE_CLEANUP_INTERVAL',
+            
+            # 🎯 NEW: Signal lists for all groups
+            'TREND_SIGNALS', 'TREND_CONFIRM_SIGNALS',
+            'ENTRY_SIGNALS_BULLISH', 'ENTRY_SIGNALS_BEARISH',
+            'ENTRY_SIGNALS_BULLISH1', 'ENTRY_SIGNALS_BEARISH1',
+            'ENTRY_SIGNALS_GROUP3_BULLISH', 'ENTRY_SIGNALS_GROUP3_BEARISH',
+            'ENTRY_SIGNALS_GROUP4_BULLISH', 'ENTRY_SIGNALS_GROUP4_BEARISH', 
+            'ENTRY_SIGNALS_GROUP5_BULLISH', 'ENTRY_SIGNALS_GROUP5_BEARISH',
+            'EXIT_SIGNALS', 'GENERAL_SIGNALS',
+            
+            # 🎯 NEW: Keywords for all groups
+            'BULLISH_KEYWORDS', 'BEARISH_KEYWORDS', 'TREND_KEYWORDS',
+            'TREND_CONFIRM_KEYWORDS', 'EXIT_KEYWORDS',
+            'GROUP3_KEYWORDS', 'GROUP4_KEYWORDS', 'GROUP5_KEYWORDS'
         ]
         
         missing_vars = []
@@ -77,7 +124,7 @@ class ConfigManager:
         return value.strip().lower() == 'true'
 
     def setup_config(self) -> None:
-        """🎯 الإعداد النهائي للتكوين بدون قيم افتراضية"""
+        """🎯 الإعداد النهائي للتكوين بدون قيم افتراضية - محدث للتجميعات"""
         try:
             logger.info("🔧 بدء تحميل إعدادات النظام بدون قيم افتراضية...")
             
@@ -106,14 +153,14 @@ class ConfigManager:
                 'MAX_TRADES_MODE1': self._get_env_int('MAX_TRADES_MODE1'),
                 'MAX_TRADES_MODE2': self._get_env_int('MAX_TRADES_MODE2'),
 
-                # 🎯 MULTI-MODE Trading Strategy Settings - بدون قيم افتراضية
+                # 🎯 MULTI-MODE Trading Strategy Settings - محدث للتجميعات
                 'TRADING_MODE': self._get_env_str('TRADING_MODE'),
                 'TRADING_MODE1': self._get_env_str('TRADING_MODE1'),
                 'TRADING_MODE2': self._get_env_str('TRADING_MODE2'),
                 'TRADING_MODE1_ENABLED': self._get_env_bool('TRADING_MODE1_ENABLED'),
                 'TRADING_MODE2_ENABLED': self._get_env_bool('TRADING_MODE2_ENABLED'),
 
-                # Group Settings - بدون قيم افتراضية
+                # Group Settings - محدث لجميع المجموعات
                 'GROUP1_ENABLED': True,  # ✅ المجموعة 1 مفعلة دائماً
                 'REQUIRED_CONFIRMATIONS_GROUP1': self._get_env_int('REQUIRED_CONFIRMATIONS_GROUP1'),
                 'GROUP1_TREND_MODE': self._get_env_str('GROUP1_TREND_MODE'),
@@ -176,7 +223,7 @@ class ConfigManager:
             raise
 
     def _apply_logging_config_enhanced(self) -> None:
-        """🎯 تطبيق إعدادات التسجيل المحسنة"""
+        """🎯 تطبيق إعدادات التسجيل المحسنة مع إصلاح ظهور السجلات"""
         try:
             log_level = self.config['LOG_LEVEL']
             debug_mode = self.config['DEBUG']
@@ -190,16 +237,28 @@ class ConfigManager:
                 'INFO': logging.INFO,
                 'DEBUG': logging.DEBUG
             }
-            level = level_mapping.get(log_level, logging.DEBUG)
+            level = level_mapping.get(log_level.upper(), logging.DEBUG)
             
             # 🛠️ الإصلاح: إعادة تهيئة نظام التسجيل بشكل كامل
             for handler in logging.root.handlers[:]:
                 logging.root.removeHandler(handler)
-                
+            
+            # 🛠️ الإصلاح: إنشاء معالج كونسول جديد
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(level)
+            
+            # تنسيق مفصل للسجلات
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            console_handler.setFormatter(formatter)
+            
             # إعادة التهيئة مع الإعدادات الجديدة
             logging.basicConfig(
                 level=level,
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                handlers=[console_handler],
                 force=True
             )
             
@@ -220,7 +279,8 @@ class ConfigManager:
                 'core.trade_manager',
                 'core.group_manager',
                 'notifications.notification_manager',
-                'werkzeug'  # 🛠️ إضافة werkzeug للتسجيل
+                'maintenance.cleanup_manager',
+                'werkzeug'
             ]
             
             for logger_name in loggers_to_configure:
@@ -229,6 +289,9 @@ class ConfigManager:
                 # إزالة أي معالجات قديمة
                 for handler in logger_instance.handlers[:]:
                     logger_instance.removeHandler(handler)
+                # إضافة المعالج الجديد
+                logger_instance.addHandler(console_handler)
+                logger_instance.propagate = False  # 🛠️ منع التكرار
             
             # 🛠️ الإصلاح النهائي: معالجة مشكلة urllib3 بشكل خاص
             urllib3_logger = logging.getLogger('urllib3.connectionpool')
@@ -271,7 +334,7 @@ class ConfigManager:
             logging.getLogger().setLevel(logging.DEBUG)
 
     def _validate_trading_mode_strict(self, mode_value: Optional[str]) -> str:
-        """التحقق الصارم من نمط التداول"""
+        """التحقق الصارم من نمط التداول - محدث للتجميعات"""
         if mode_value is None:
             raise ValueError("❌ TRADING_MODE غير محدد - مطلوب قيمة في ملف .env")
         
@@ -281,6 +344,10 @@ class ConfigManager:
         mode_clean = mode_value.strip().upper()
         valid_groups = ['GROUP1', 'GROUP2', 'GROUP3', 'GROUP4', 'GROUP5']
         groups_in_mode = mode_clean.split('_')
+        
+        # 🎯 التحقق من عدم وجود تكرار في التجميع
+        if len(groups_in_mode) != len(set(groups_in_mode)):
+            raise ValueError(f"❌ يوجد تكرار في المجموعات: {mode_clean}")
         
         for group in groups_in_mode:
             if group not in valid_groups:
@@ -293,7 +360,7 @@ class ConfigManager:
         return mode_clean
 
     def _validate_trading_modes_strict(self) -> None:
-        """🚫 التحقق النهائي من أنماط التداول - إيقاف النظام إذا كان هناك خطأ"""
+        """🚫 التحقق النهائي من أنماط التداول - محدث للتجميعات"""
         required_modes = ['TRADING_MODE']
         
         for mode_key in required_modes:
@@ -310,6 +377,25 @@ class ConfigManager:
             
         if self.config.get('TRADING_MODE2_ENABLED') and self.config.get('TRADING_MODE2') is None:
             raise ValueError("❌ TRADING_MODE2 مطلوب في ملف .env لأن TRADING_MODE2_ENABLED=true")
+
+        # 🎯 التحقق من أن المجموعات المستخدمة في التجميعات مفعلة
+        self._validate_trading_mode_combinations()
+
+    def _validate_trading_mode_combinations(self) -> None:
+        """🎯 التحقق من أن جميع المجموعات في التجميعات مفعلة"""
+        trading_modes_to_check = [
+            self.config['TRADING_MODE'],
+            self.config['TRADING_MODE1'],
+            self.config['TRADING_MODE2']
+        ]
+        
+        for mode in trading_modes_to_check:
+            if mode:
+                groups = mode.split('_')
+                for group in groups:
+                    enabled_key = f"{group}_ENABLED"
+                    if not self.config.get(enabled_key, False):
+                        logger.warning(f"⚠️ المجموعة {group} مستخدمة في {mode} ولكنها معطلة")
 
     @lru_cache(maxsize=1)
     def _load_all_signals(self) -> Dict[str, List[str]]:
@@ -414,7 +500,7 @@ class ConfigManager:
         return len(groups_in_mode) > 0
 
     def display_config(self) -> None:
-        """عرض الإعدادات المحملة للتحقق"""
+        """عرض الإعدادات المحملة للتحقق - محدث للتجميعات"""
         logging.info("\n🔧 LOADED CONFIGURATION:")
         logging.info("   📱 Telegram: " + ("✅ ENABLED" if self.config['TELEGRAM_ENABLED'] else "❌ DISABLED"))
         logging.info("   🌐 External Server: " + ("✅ ENABLED" if self.config['EXTERNAL_SERVER_ENABLED'] else "❌ DISABLED"))
