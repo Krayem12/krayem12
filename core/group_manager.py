@@ -5,12 +5,11 @@ from typing import Dict, List, Optional, Tuple
 import threading
 from collections import defaultdict, deque
 from functools import lru_cache
-from utils.time_utils import saudi_time  # ✅ تم الإضافة
 
 logger = logging.getLogger(__name__)
 
 class GroupManager:
-    """🎯 نظام إدارة المجموعات بالتوقيت السعودي"""
+    """🎯 نظام إدارة المجموعات بدون قيم افتراضية"""
 
     def __init__(self, config, trade_manager):
         self.config = config
@@ -32,24 +31,23 @@ class GroupManager:
         
         # تحسين الأداء
         self.signal_hashes = {}
-        self.last_hash_cleanup = saudi_time.now()  # ✅ تم التعديل
+        self.last_hash_cleanup = datetime.now()
         
         # 🎯 NEW: تتبع الإشارات المستخدمة في الصفقات المفتوحة
         self.used_signals_for_trades = defaultdict(set)
         
-        logger.info(f"🎯 نظام المجموعات المصحح جاهز - وقت منع التكرار: {self.duplicate_block_time} ثانية - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+        logger.info(f"🎯 نظام المجموعات المصحح جاهز - وقت منع التكرار: {self.duplicate_block_time} ثانية")
 
     def _handle_error(self, error_msg: str, exception: Optional[Exception] = None, 
                      extra_data: Optional[Dict] = None) -> None:
-        """🎯 معالجة الأخطاء بالتوقيت السعودي"""
+        """🎯 معالجة الأخطاء"""
         full_error = f"{error_msg}: {exception}" if exception else error_msg
         if extra_data:
             full_error += f" | Extra: {extra_data}"
         logger.error(full_error)
         
         error_entry = {
-            'timestamp': saudi_time.now().isoformat(),  # ✅ تم التعديل
-            'timezone': 'Asia/Riyadh 🇸🇦',  # ✅ تم الإضافة
+            'timestamp': datetime.now().isoformat(),
             'error': full_error
         }
         self.error_log.append(error_entry)
@@ -68,9 +66,9 @@ class GroupManager:
             return False
 
     def route_signal(self, symbol: str, signal_data: Dict, classification: str) -> List[Dict]:
-        """🎯 توجيه الإشارة للمجموعة المناسبة بالتوقيت السعودي"""
+        """🎯 توجيه الإشارة للمجموعة المناسبة"""
         
-        logger.info(f"🎯 بدء توجيه الإشارة: {symbol} -> {classification} -> {signal_data.get('signal_type')} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+        logger.info(f"🎯 بدء توجيه الإشارة: {symbol} -> {classification} -> {signal_data.get('signal_type')}")
         
         if not self._validate_input(symbol, signal_data, classification):
             return []
@@ -85,7 +83,7 @@ class GroupManager:
                 logger.error(f"❌ لا يمكن تحديد المجموعة أو الاتجاه للتصنيف: {classification}")
                 return []
 
-            logger.info(f"🎯 تم تحديد: {symbol} -> {group_type} -> {direction} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.info(f"🎯 تم تحديد: {symbol} -> {group_type} -> {direction}")
 
             # ✅ FIXED: التحقق من تفعيل المجموعة أولاً
             if not self._is_group_enabled(group_type):
@@ -94,7 +92,7 @@ class GroupManager:
 
             # 🎯 FIXED: استخدام وقت منع التكرار من الإعدادات فقط
             if self._is_duplicate_signal_optimized(symbol, signal_data, group_type):
-                logger.info(f"🔁 إشارة مكررة - تم تجاهلها: {symbol} -> {signal_data.get('signal_type')} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.info(f"🔁 إشارة مكررة - تم تجاهلها: {symbol} -> {signal_data.get('signal_type')}")
                 return []
 
             # استخدام القفل لمنع التزامن
@@ -112,9 +110,9 @@ class GroupManager:
                 trade_results = self._evaluate_entry_conditions(symbol, direction)
                 
                 if trade_results:
-                    logger.info(f"✅ تم فتح {len(trade_results)} صفقة لـ {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.info(f"✅ تم فتح {len(trade_results)} صفقة لـ {symbol}")
                 else:
-                    logger.info(f"⏸️ لم يتم فتح صفقات لـ {symbol} - الشروط غير متحققة - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.info(f"⏸️ لم يتم فتح صفقات لـ {symbol} - الشروط غير متحققة")
                 
                 return trade_results
 
@@ -139,11 +137,11 @@ class GroupManager:
             current_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
             
             if group_trend_mode == 'ALLOW_COUNTER_TREND':
-                logger.info(f"🔓 فتح الصفقة بدون قيود اتجاه: {symbol} -> {direction.upper()} (المجموعة: {group_key}) - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.info(f"🔓 فتح الصفقة بدون قيود اتجاه: {symbol} -> {direction.upper()} (المجموعة: {group_key})")
                 return True
             
             if current_trend == 'UNKNOWN':
-                logger.warning(f"⏸️ تجاهل الإشارة - اتجاه غير معروف: {symbol} للمجموعة {group_key} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.warning(f"⏸️ تجاهل الإشارة - اتجاه غير معروف: {symbol} للمجموعة {group_key}")
                 return False
             
             is_aligned = (
@@ -152,10 +150,10 @@ class GroupManager:
             )
             
             if not is_aligned:
-                logger.warning(f"🚫 الإشارة مخالفة للاتجاه: {direction.upper()} vs {current_trend.upper()} (المجموعة: {group_key}) - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.warning(f"🚫 الإشارة مخالفة للاتجاه: {direction.upper()} vs {current_trend.upper()} (المجموعة: {group_key})")
                 return False
             
-            logger.info(f"✅ الإشارة متوافقة مع الاتجاه: {direction.upper()} vs {current_trend.upper()} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.info(f"✅ الإشارة متوافقة مع الاتجاه: {direction.upper()} vs {current_trend.upper()}")
             return True
             
         except Exception as e:
@@ -176,7 +174,7 @@ class GroupManager:
             if classification in direct_classification_map:
                 result = direct_classification_map[classification]
                 if all(result):
-                    logger.info(f"🎯 تم تحديد المجموعة مباشرة: {classification} -> {result} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.info(f"🎯 تم تحديد المجموعة مباشرة: {classification} -> {result}")
                     return result
             
             group_classification_map = {
@@ -199,10 +197,10 @@ class GroupManager:
             if classification in group_classification_map:
                 result = group_classification_map[classification]
                 if result and all(result):
-                    logger.info(f"🎯 تم تحديد المجموعة: {classification} -> {result} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.info(f"🎯 تم تحديد المجموعة: {classification} -> {result}")
                     return result
             
-            logger.error(f"❌ تصنيف غير معروف أو المجموعة معطلة: {classification} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.error(f"❌ تصنيف غير معروف أو المجموعة معطلة: {classification}")
             return None, None
                 
         except Exception as e:
@@ -230,7 +228,6 @@ class GroupManager:
                 
             signal_type = signal_data.get('signal_type', '').lower()
             
-            # ✅ FIX: Safe access to signals configuration
             signals_config = self.config.get('signals', {})
             group_bullish = [s.lower().strip() for s in signals_config.get(f'group{group_num}_bullish', [])]
             group_bearish = [s.lower().strip() for s in signals_config.get(f'group{group_num}_bearish', [])]
@@ -240,7 +237,7 @@ class GroupManager:
             elif signal_type in group_bearish:
                 return f'group{group_num}_bearish', 'sell'
             
-            logger.debug(f"🔍 إشارة غير معروفة للمجموعة {group_num}: {signal_type} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.debug(f"🔍 إشارة غير معروفة للمجموعة {group_num}: {signal_type}")
             return None, None
             
         except Exception as e:
@@ -272,7 +269,7 @@ class GroupManager:
 
     def _add_signal_to_group(self, symbol: str, signal_data: Dict, group_type: str, 
                            direction: str, classification: str) -> None:
-        """إضافة الإشارة للمجموعة بالتوقيت السعودي"""
+        """إضافة الإشارة للمجموعة"""
         try:
             group_key = symbol.upper().strip()
             
@@ -285,35 +282,34 @@ class GroupManager:
                 for gt in all_group_types:
                     self.pending_signals[group_key][gt] = deque(maxlen=100)
                 
-                self.pending_signals[group_key]["created_at"] = saudi_time.now()  # ✅ تم التعديل
+                self.pending_signals[group_key]["created_at"] = datetime.now()
             
             signal_info = {
                 'hash': hashlib.md5(
-                    f"{signal_data['signal_type']}_{classification}_{symbol}_{saudi_time.now().strftime('%Y%m%d%H%M%S')}".encode()  # ✅ تم التعديل
+                    f"{signal_data['signal_type']}_{classification}_{symbol}_{datetime.now().strftime('%Y%m%d%H%M%S')}".encode()
                 ).hexdigest(),
                 'signal_type': signal_data['signal_type'],
                 'classification': classification,
-                'timestamp': saudi_time.now(),  # ✅ تم التعديل
+                'timestamp': datetime.now(),
                 'direction': direction,
                 'symbol': symbol,
-                'group_type': group_type,
-                'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
+                'group_type': group_type
             }
             
             self.pending_signals[group_key][group_type].append(signal_info)
-            self.pending_signals[group_key]["updated_at"] = saudi_time.now()  # ✅ تم التعديل
+            self.pending_signals[group_key]["updated_at"] = datetime.now()
             
-            logger.info(f"📥 إشارة مضافة: {symbol} -> {signal_data['signal_type']} → {group_type} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.info(f"📥 إشارة مضافة: {symbol} -> {signal_data['signal_type']} → {group_type}")
             
         except Exception as e:
             self._handle_error("💥 خطأ في إضافة الإشارة للمجموعة", e)
 
     def _is_duplicate_signal_optimized(self, symbol: str, signal_data: Dict, group_type: str) -> bool:
-        """🎯 FIXED: منع الإشارات المكررة مع القراءة من الإعدادات فقط بالتوقيت السعودي"""
+        """🎯 FIXED: منع الإشارات المكررة مع القراءة من الإعدادات فقط"""
         try:
             self._cleanup_old_hashes()
             
-            current_time = saudi_time.now()  # ✅ تم التعديل
+            current_time = datetime.now()
             
             signal_key = f"{symbol}_{signal_data['signal_type']}_{group_type}"
             signal_hash = hashlib.md5(signal_key.encode()).hexdigest()
@@ -322,11 +318,11 @@ class GroupManager:
                 time_elapsed = (current_time - self.signal_hashes[signal_hash]).total_seconds()
                 
                 if time_elapsed < self.duplicate_block_time:
-                    logger.info(f"🔁 إشارة مكررة خلال {self.duplicate_block_time} ثانية - تم تجاهلها: {symbol} -> {signal_data.get('signal_type')} (مر {time_elapsed:.1f} ثانية) - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.info(f"🔁 إشارة مكررة خلال {self.duplicate_block_time} ثانية - تم تجاهلها: {symbol} -> {signal_data.get('signal_type')} (مر {time_elapsed:.1f} ثانية)")
                     return True
                 else:
                     self.signal_hashes[signal_hash] = current_time
-                    logger.debug(f"🔄 إشارة قديمة - تم تحديث الوقت: {symbol} -> {signal_data.get('signal_type')} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.debug(f"🔄 إشارة قديمة - تم تحديث الوقت: {symbol} -> {signal_data.get('signal_type')}")
                     return False
             else:
                 self.signal_hashes[signal_hash] = current_time
@@ -337,9 +333,9 @@ class GroupManager:
             return False
 
     def _cleanup_old_hashes(self):
-        """🎯 FIXED: تنظيف التجزئات القديمة باستخدام الإعدادات من .env فقط بالتوقيت السعودي"""
+        """🎯 FIXED: تنظيف التجزئات القديمة باستخدام الإعدادات من .env فقط"""
         try:
-            current_time = saudi_time.now()  # ✅ تم التعديل
+            current_time = datetime.now()
             
             if (current_time - self.last_hash_cleanup).total_seconds() > self.duplicate_cleanup_interval:
                 initial_count = len(self.signal_hashes)
@@ -356,7 +352,7 @@ class GroupManager:
                 
                 cleaned_count = len(expired_hashes)
                 if cleaned_count > 0:
-                    logger.debug(f"🧹 تم تنظيف {cleaned_count} تجزئة قديمة من أصل {initial_count} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.debug(f"🧹 تم تنظيف {cleaned_count} تجزئة قديمة من أصل {initial_count}")
                 
                 self.last_hash_cleanup = current_time
                 
@@ -367,12 +363,12 @@ class GroupManager:
         """معالجة الإشارة المخالفة للاتجاه"""
         store_contrarian = self.config['STORE_CONTRARIAN_SIGNALS']
         if store_contrarian:
-            logger.info(f"📦 الإشارة مخالفة للاتجاه - تم تخزينها: {symbol} → {signal_data['signal_type']} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.info(f"📦 الإشارة مخالفة للاتجاه - تم تخزينها: {symbol} → {signal_data['signal_type']}")
         else:
-            logger.info(f"🚫 الإشارة مخالفة للاتجاه - تم تجاهلها: {symbol} → {signal_data['signal_type']} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.info(f"🚫 الإشارة مخالفة للاتجاه - تم تجاهلها: {symbol} → {signal_data['signal_type']}")
 
     def _evaluate_entry_conditions(self, symbol: str, direction: str) -> List[Dict]:
-        """✅ FIXED: تقييم شروط الدخول بشكل آمن"""
+        """✅ FIXED: تقييم شروط الدخول بشكل آمن مع تسجيل مفصل"""
         try:
             group_key = symbol.upper().strip()
             
@@ -386,7 +382,13 @@ class GroupManager:
                 logger.warning(f"⚠️ لا توجد إشارات للاتجاه {direction} في {symbol}")
                 return []
             
-            logger.info(f"📊 إحصائيات {symbol} [{direction.upper()}]: G1={signal_counts['g1']}, G2={signal_counts['g2']}, G3={signal_counts['g3']}, G4={signal_counts['g4']}, G5={signal_counts['g5']} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            # 🛠️ تسجيل مفصل للإحصائيات
+            logger.info(f"📊 إحصائيات مفصلة لـ {symbol} [{direction.upper()}]:")
+            logger.info(f"   📈 المجموعة 1: {signal_counts['g1']} إشارة (مطلوب: {self.config.get('REQUIRED_CONFIRMATIONS_GROUP1', 1)})")
+            logger.info(f"   📈 المجموعة 2: {signal_counts['g2']} إشارة (مطلوب: {self.config.get('REQUIRED_CONFIRMATIONS_GROUP2', 1)})")
+            logger.info(f"   📈 المجموعة 3: {signal_counts['g3']} إشارة (مطلوب: {self.config.get('REQUIRED_CONFIRMATIONS_GROUP3', 1)})")
+            logger.info(f"   📈 المجموعة 4: {signal_counts['g4']} إشارة (مطلوب: {self.config.get('REQUIRED_CONFIRMATIONS_GROUP4', 1)})")
+            logger.info(f"   📈 المجموعة 5: {signal_counts['g5']} إشارة (مطلوب: {self.config.get('REQUIRED_CONFIRMATIONS_GROUP5', 1)})")
             
             active_modes = self._get_active_modes()
             trade_results = []
@@ -442,14 +444,14 @@ class GroupManager:
         if self.config['TRADING_MODE2_ENABLED']:
             active_modes.append('TRADING_MODE2')
         
-        logger.info(f"🎯 الأنماط المفعلة: {active_modes} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+        logger.info(f"🎯 الأنماط المفعلة: {active_modes}")
         return active_modes
 
     def _evaluate_single_mode(self, mode_key: str, symbol: str, direction: str, signal_counts: Dict) -> Optional[Dict]:
         """🎯 FIXED: تقييم نمط تداول فردي مع التحقق من الإشارات الجديدة"""
         try:
             if not self._can_open_trade(symbol, mode_key):
-                logger.warning(f"🚫 لا يمكن فتح صفقة لـ {symbol} - حدود النمط {mode_key} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.warning(f"🚫 لا يمكن فتح صفقة لـ {symbol} - حدود النمط {mode_key}")
                 return None
             
             trading_mode = self.config.get(mode_key)
@@ -463,10 +465,10 @@ class GroupManager:
             if conditions_met:
                 # 🎯 FIXED: التحقق من أن هذه الإشارات لم تستخدم مسبقاً في صفقات
                 if not self._are_signals_new(symbol, required_groups, direction):
-                    logger.warning(f"🚫 الإشارات مستخدمة مسبقاً في صفقات أخرى لـ {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.warning(f"🚫 الإشارات مستخدمة مسبقاً في صفقات أخرى لـ {symbol}")
                     return None
                 
-                logger.info(f"✅ تحققت شروط النمط {mode_key} لـ {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.info(f"✅ تحققت شروط النمط {mode_key} لـ {symbol}")
                 if self._open_trade(symbol, direction, trading_mode, mode_key):
                     trade_info = self._collect_trade_signals(symbol, direction, required_groups)
                     trade_info.update({
@@ -474,14 +476,13 @@ class GroupManager:
                         'direction': direction,
                         'strategy_type': trading_mode,
                         'mode_key': mode_key,
-                        'trade_timestamp': saudi_time.now().isoformat(),  # ✅ تم التعديل
-                        'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
+                        'trade_timestamp': datetime.now().isoformat()
                     })
                     return trade_info
                 else:
-                    logger.error(f"❌ فشل فتح الصفقة رغم تحقق الشروط لـ {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.error(f"❌ فشل فتح الصفقة رغم تحقق الشروط لـ {symbol}")
             else:
-                logger.info(f"⏸️ لم تتحقق شروط النمط {mode_key} لـ {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.info(f"⏸️ لم تتحقق شروط النمط {mode_key} لـ {symbol}")
             
             return None
             
@@ -513,7 +514,7 @@ class GroupManager:
                 if group_type in groups:
                     for signal in groups[group_type]:
                         if signal.get('hash') in used_hashes:
-                            logger.warning(f"🚫 إشارة مستخدمة مسبقاً: {signal.get('signal_type')} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                            logger.warning(f"🚫 إشارة مستخدمة مسبقاً: {signal.get('signal_type')}")
                             return False
             
             return True
@@ -528,13 +529,13 @@ class GroupManager:
             current_count = self.trade_manager.get_active_trades_count(symbol)
             max_per_symbol = self.config['MAX_TRADES_PER_SYMBOL']
             if current_count >= max_per_symbol:
-                logger.warning(f"🚫 وصل الحد الأقصى للصفقات للرمز {symbol}: {current_count}/{max_per_symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.warning(f"🚫 وصل الحد الأقصى للصفقات للرمز {symbol}: {current_count}/{max_per_symbol}")
                 return False
             
             total_trades = self.trade_manager.get_active_trades_count()
             max_open_trades = self.config['MAX_OPEN_TRADES']
             if total_trades >= max_open_trades:
-                logger.warning(f"🚫 وصل الحد الأقصى الإجمالي للصفقات: {total_trades}/{max_open_trades} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.warning(f"🚫 وصل الحد الأقصى الإجمالي للصفقات: {total_trades}/{max_open_trades}")
                 return False
             
             mode_limits = {
@@ -547,7 +548,7 @@ class GroupManager:
             mode_limit = mode_limits.get(mode_key, 2)
             
             if current_mode_trades >= mode_limit:
-                logger.warning(f"🚫 وصل الحد الأقصى للنمط {mode_key}: {current_mode_trades}/{mode_limit} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.warning(f"🚫 وصل الحد الأقصى للنمط {mode_key}: {current_mode_trades}/{mode_limit}")
                 return False
             
             return True
@@ -557,7 +558,7 @@ class GroupManager:
             return False
 
     def _check_strategy_conditions(self, trading_mode: str, signal_counts: Dict) -> Tuple[bool, List[str]]:
-        """✅ FIXED: التحقق من شروط الاستراتيجية بشكل آمن"""
+        """✅ FIXED: التحقق من شروط الاستراتيجية بشكل آمن مع إصلاح المجموعتين 4 و5"""
         try:
             if not trading_mode or not isinstance(trading_mode, str):
                 return False, []
@@ -565,32 +566,38 @@ class GroupManager:
             required_groups = trading_mode.split('_') if trading_mode else []
             conditions_met = True
             
-            logger.info(f"🔍 فحص شروط الاستراتيجية: {trading_mode} -> {required_groups} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.info(f"🔍 فحص شروط الاستراتيجية: {trading_mode} -> {required_groups}")
+            logger.info(f"📊 إحصائيات الإشارات المتاحة: {signal_counts}")
             
             for group in required_groups:
                 if not group:
                     continue
                     
-                group_key = group.lower()
+                group_key = group.upper().strip()  # ✅ التأكد من الأحرف الكبيرة
                 
-                group_enabled_key = f"{group}_ENABLED"
+                group_enabled_key = f"{group_key}_ENABLED"
                 if not self.config.get(group_enabled_key, False):
-                    logger.warning(f"🚫 المجموعة {group} غير مفعلة - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.warning(f"🚫 المجموعة {group_key} غير مفعلة")
                     conditions_met = False
                     break
                 
-                confirmations_key = f"REQUIRED_CONFIRMATIONS_{group}"
+                confirmations_key = f"REQUIRED_CONFIRMATIONS_{group_key}"
                 required_confirmations = self.config.get(confirmations_key, 1)
                 
-                signal_count_key = f"g{group_key[-1]}" if group_key and group_key[-1].isdigit() else "g1"
+                # 🛠️ الإصلاح: استخدام الترقيم الصحيح للمجموعات
+                group_number = group_key.replace('GROUP', '')  # استخراج الرقم فقط
+                signal_count_key = f"g{group_number}"  # GROUP4 -> g4, GROUP5 -> g5
+                
                 current_signals = signal_counts.get(signal_count_key, 0)
                 
+                logger.info(f"🔍 فحص المجموعة {group_key}: المطلوب {required_confirmations}, المتوفر {current_signals}")
+                
                 if current_signals < required_confirmations:
-                    logger.warning(f"🚫 إشارات غير كافية للمجموعة {group}: {current_signals}/{required_confirmations} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.warning(f"🚫 إشارات غير كافية للمجموعة {group_key}: {current_signals}/{required_confirmations}")
                     conditions_met = False
                     break
                 else:
-                    logger.info(f"✅ شروط المجموعة {group} متحققة: {current_signals}/{required_confirmations} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                    logger.info(f"✅ شروط المجموعة {group_key} متحققة: {current_signals}/{required_confirmations}")
             
             return conditions_met, required_groups
             
@@ -632,12 +639,12 @@ class GroupManager:
                 if mode_key not in self.mode_performance:
                     self.mode_performance[mode_key] = {'opened': 0, 'failed': 0}
                 self.mode_performance[mode_key]['opened'] += 1
-                logger.info(f"✅ تم فتح صفقة: {symbol} - {direction} - {strategy_type} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.info(f"✅ تم فتح صفقة: {symbol} - {direction} - {strategy_type}")
             else:
                 if mode_key not in self.mode_performance:
                     self.mode_performance[mode_key] = {'opened': 0, 'failed': 0}
                 self.mode_performance[mode_key]['failed'] += 1
-                logger.error(f"❌ فشل فتح صفقة: {symbol} - {direction} - {strategy_type} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.error(f"❌ فشل فتح صفقة: {symbol} - {direction} - {strategy_type}")
                 
             return success
             
@@ -677,22 +684,22 @@ class GroupManager:
                         # 🎯 FIXED: إعادة تعيين كامل للإشارات المستخدمة
                         original_count = len(groups[group_type])
                         groups[group_type].clear()
-                        logger.info(f"🔄 إعادة تعيين إشارات {group_type}: {original_count} -> 0 - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                        logger.info(f"🔄 إعادة تعيين إشارات {group_type}: {original_count} -> 0")
             
-            logger.info(f"🔁 تم إعادة تعيين الإشارات المستخدمة لـ {symbol} - جاهز لإشارات جديدة - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.info(f"🔁 تم إعادة تعيين الإشارات المستخدمة لـ {symbol} - جاهز لإشارات جديدة")
                 
         except Exception as e:
             self._handle_error(f"⚠️ خطأ في إعادة تعيين الإشارات", e)
 
     def cleanup_expired_signals(self, symbol: str) -> None:
-        """تنظيف الإشارات المنتهية الصلاحية بالتوقيت السعودي"""
+        """تنظيف الإشارات المنتهية الصلاحية"""
         try:
             group_key = symbol.upper().strip()
             if group_key not in self.pending_signals:
                 return
 
             ttl_minutes = self.config['SIGNAL_TTL_MINUTES']
-            expiration_time = saudi_time.now() - timedelta(minutes=ttl_minutes)  # ✅ تم التعديل
+            expiration_time = datetime.now() - timedelta(minutes=ttl_minutes)
 
             cleaned_count = 0
             for group_type in list(self.pending_signals[group_key].keys()):
@@ -703,13 +710,13 @@ class GroupManager:
                     original_count = len(self.pending_signals[group_key][group_type])
                     self.pending_signals[group_key][group_type] = deque(
                         [signal for signal in self.pending_signals[group_key][group_type]
-                         if signal.get('timestamp', saudi_time.now()) > expiration_time],  # ✅ تم التعديل
+                         if signal.get('timestamp', datetime.now()) > expiration_time],
                         maxlen=100
                     )
                     cleaned_count += (original_count - len(self.pending_signals[group_key][group_type]))
 
             if cleaned_count > 0:
-                logger.info(f"🧹 تم تنظيف {cleaned_count} إشارة منتهية لـ {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.info(f"🧹 تم تنظيف {cleaned_count} إشارة منتهية لـ {symbol}")
 
         except Exception as e:
             self._handle_error(f"⚠️ خطأ في تنظيف الإشارات المنتهية الصلاحية", e)
@@ -737,34 +744,32 @@ class GroupManager:
                 'group5_bullish': len(groups.get('group5_bullish', [])),
                 'group5_bearish': len(groups.get('group5_bearish', [])),
                 'total_signals': sum(len(groups[gt]) for gt in groups if gt not in ['created_at', 'updated_at'] and isinstance(groups[gt], deque)),
-                'updated_at': groups.get('updated_at'),
-                'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
+                'updated_at': groups.get('updated_at')
             }
         except Exception as e:
             self._handle_error(f"⚠️ خطأ في إحصائيات المجموعات", e)
             return None
 
     def get_performance_metrics(self) -> Dict:
-        """الحصول على مقاييس الأداء بالتوقيت السعودي"""
+        """الحصول على مقاييس الأداء"""
         return {
             'error_count': len(self.error_log),
             'mode_performance': self.mode_performance.copy(),
             'signal_hashes_count': len(self.signal_hashes),
             'last_hash_cleanup': self.last_hash_cleanup.isoformat(),
-            'used_signals_count': sum(len(signals) for signals in self.used_signals_for_trades.values()),
-            'timezone': 'Asia/Riyadh 🇸🇦'  # ✅ تم الإضافة
+            'used_signals_count': sum(len(signals) for signals in self.used_signals_for_trades.values())
         }
 
     def force_open_trade(self, symbol: str, direction: str, strategy_type: str = "MANUAL", mode_key: str = "TRADING_MODE") -> bool:
-        """فتح صفقة قسراً بالتوقيت السعودي"""
+        """فتح صفقة قسراً"""
         try:
-            logger.info(f"🔧 محاولة فتح صفقة قسراً: {symbol} - {direction} - {strategy_type} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+            logger.info(f"🔧 محاولة فتح صفقة قسراً: {symbol} - {direction} - {strategy_type}")
             success = self.trade_manager.open_trade(symbol, direction, strategy_type, mode_key)
             
             if success:
-                logger.info(f"✅ تم فتح الصفقة القسرية بنجاح: {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.info(f"✅ تم فتح الصفقة القسرية بنجاح: {symbol}")
             else:
-                logger.error(f"❌ فشل فتح الصفقة القسرية: {symbol} - التوقيت السعودي 🇸🇦")  # ✅ تم التعديل
+                logger.error(f"❌ فشل فتح الصفقة القسرية: {symbol}")
                 
             return success
             
