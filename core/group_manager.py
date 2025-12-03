@@ -169,7 +169,7 @@ class GroupManager:
             trend_mode_key = f"{group_key.upper()}_TREND_MODE"
             group_trend_mode = self.config.get(trend_mode_key, self.config.get('GROUP1_TREND_MODE', 'ONLY_TREND'))
             
-            current_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
+            current_trend = self.trade_manager.get_current_trend(symbol)
             
             if group_trend_mode == 'ALLOW_COUNTER_TREND':
                 logger.info(f"🔓 فتح الصفقة بدون قيود اتجاه: {symbol} -> {direction.upper()} (المجموعة: {group_key}) - التوقيت السعودي 🇸🇦")

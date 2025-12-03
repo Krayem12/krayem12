@@ -31,6 +31,15 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+try:
+    from utils.redis_helper import RedisManager
+except ImportError:
+    try:
+        from ..utils.redis_helper import RedisManager
+    except ImportError:
+        RedisManager = None
+
+
 class TradeManager:
     """
     🎯 نظام اتجاه محسّن - بالتوقيت السعودي
@@ -62,6 +71,20 @@ class TradeManager:
         self.group_manager = None
         self.notification_manager = None
         self._error_log = []
+
+
+    # Redis integration for persistent trend storage
+    self.redis = None
+    try:
+        if RedisManager is not None:
+            self.redis = RedisManager()
+    except Exception as e:
+        logger.error("⚠️ تعذر تهيئة RedisManager", exc_info=True)
+        self.redis = None
+
+    # Load existing trends from Redis on startup
+    if getattr(self, "redis", None) is not None and getattr(self.redis, "is_enabled", lambda: True)():
+        self._load_trends_from_redis()
 
         logger.info("🎯 TradeManager Loaded: Enhanced Trend System - التوقيت السعودي 🇸🇦")
 
@@ -211,6 +234,14 @@ class TradeManager:
                 
                 self.current_trend[symbol] = new_trend
                 self.last_reported_trend[symbol] = new_trend
+
+                # حفظ الاتجاه بشكل دائم في Redis
+                if self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+                    try:
+                        self.redis.set_trend(symbol, new_trend)
+                    except Exception as e:
+                        self._handle_error(f"⚠️ خطأ في حفظ الاتجاه في Redis لـ {symbol}", e)
+
 
                 used_signals = list(pool["signals"].values())
 
@@ -413,6 +444,13 @@ class TradeManager:
             self.current_trend[symbol] = new_trend
             self.last_reported_trend[symbol] = new_trend
             self._reset_trend_pool(symbol)
+
+            # حفظ الاتجاه القسري في Redis
+            if self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+                try:
+                    self.redis.set_trend(symbol, new_trend)
+                except Exception as e:
+                    self._handle_error(f"⚠️ خطأ في حفظ الاتجاه القسري في Redis لـ {symbol}", e)
             logger.info(f"🔧 تغيير اتجاه قسري: {symbol} {old_trend} → {new_trend} - التوقيت السعودي 🇸🇦")
             return True
         except Exception as e:
@@ -436,12 +474,49 @@ class TradeManager:
             for data_dict in keys_to_clear:
                 if symbol in data_dict:
                     del data_dict[symbol]
-            
+
+            # مسح بيانات الاتجاه من Redis أيضاً
+            if self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+                try:
+                    self.redis.clear_trend(symbol)
+                except Exception as e:
+                    self._handle_error(f"⚠️ خطأ في مسح الاتجاه من Redis لـ {symbol}", e)
+
             logger.info(f"🧹 تم مسح جميع بيانات الاتجاه لـ {symbol} - التوقيت السعودي 🇸🇦")
             return True
         except Exception as e:
             self._handle_error(f"💥 خطأ في مسح بيانات الاتجاه لـ {symbol}", e)
             return False
+
+
+    def _load_trends_from_redis(self) -> None:
+        """تحميل الاتجاهات المحفوظة من Redis عند بدء التشغيل"""
+        try:
+            if self.redis is None or not getattr(self.redis, "is_enabled", lambda: True)():
+                return
+            trends = self.redis.get_all_trends()
+            if not trends:
+                logger.info("ℹ️ لا توجد اتجاهات محفوظة مسبقاً في Redis")
+                return
+            for symbol, trend in trends.items():
+                self.current_trend[symbol] = trend
+            logger.info(f"✅ تم تحميل {len(trends)} اتجاه(ات) من Redis عند بدء التشغيل")
+        except Exception as e:
+            self._handle_error("⚠️ خطأ في تحميل الاتجاهات من Redis", e)
+
+    def get_current_trend(self, symbol: str) -> str:
+        """الحصول على الاتجاه الحالي مع استخدام Redis كمصدر دائم"""
+        try:
+            trend = self.current_trend.get(symbol, "UNKNOWN")
+            if trend == "UNKNOWN" and self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+                saved = self.redis.get_trend(symbol)
+                if saved:
+                    self.current_trend[symbol] = saved
+                    trend = saved
+            return trend
+        except Exception as e:
+            self._handle_error(f"⚠️ خطأ في قراءة الاتجاه الحالي من Redis لـ {symbol}", e)
+            return self.current_trend.get(symbol, "UNKNOWN")
 
     def get_trading_limits(self, symbol: str) -> Dict:
         """الحصول على حدود التداول الحالية"""

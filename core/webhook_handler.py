@@ -381,7 +381,7 @@ class WebhookHandler:
             "symbol": symbol, 
             "classification": classification,
             "trend_changed": should_report,
-            "current_trend": self.trade_manager.current_trend.get(symbol, "UNKNOWN"),
+            "current_trend": self.trade_manager.get_current_trend(symbol),
             "old_trend": old_trend or "UNKNOWN",
             "signals_used": len(trend_signals),
             "signals_details": [{"signal_type": s['signal_type'], "direction": s['direction']} for s in trend_signals],
@@ -395,7 +395,7 @@ class WebhookHandler:
             logger.info(f"🔍 تحقق الإشعار - التليجرام: {telegram_enabled}, الخارجي: {external_enabled} - التوقيت السعودي 🇸🇦")
             
             if telegram_enabled or external_enabled:
-                self._send_trend_notification(signal_data, self.trade_manager.current_trend.get(symbol, "UNKNOWN"), old_trend, trend_signals)
+                self._send_trend_notification(signal_data, self.trade_manager.get_current_trend(symbol), old_trend, trend_signals)
             else:
                 logger.info("🔕 جميع خدمات الإشعارات معطلة - تم تخطي إرسال إشعار الاتجاه - التوقيت السعودي 🇸🇦")
         
@@ -539,7 +539,7 @@ class WebhookHandler:
             
             for trade in trade_results:
                 symbol = trade['symbol']
-                current_trend = self.trade_manager.current_trend.get(symbol, 'UNKNOWN')
+                current_trend = self.trade_manager.get_current_trend(symbol)
                 active_count = self.trade_manager.get_active_trades_count(symbol)
                 total_active = self.trade_manager.get_active_trades_count()
                 

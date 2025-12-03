@@ -5,7 +5,7 @@ import os
 LOCAL_PATH = "c://krayem"
 
 # رابط مستودع GitHub
-GITHUB_REPO = "https://github.com/Krayem12/krayem12.git"
+GITHUB_REPO = "https://github.com/Krayem12/krayem.git"
 
 # الدخول للمجلد
 os.chdir(LOCAL_PATH)
