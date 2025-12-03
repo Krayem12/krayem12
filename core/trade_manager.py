@@ -72,19 +72,18 @@ class TradeManager:
         self.notification_manager = None
         self._error_log = []
 
-
-    # Redis integration for persistent trend storage
-    self.redis = None
-    try:
-        if RedisManager is not None:
-            self.redis = RedisManager()
-    except Exception as e:
-        logger.error("⚠️ تعذر تهيئة RedisManager", exc_info=True)
+        # 🔗 تكامل Redis لتخزين الاتجاهات بشكل دائم
         self.redis = None
+        try:
+            if RedisManager is not None:
+                self.redis = RedisManager()
+        except Exception as e:
+            logger.error("⚠️ تعذر تهيئة RedisManager", exc_info=True)
+            self.redis = None
 
-    # Load existing trends from Redis on startup
-    if getattr(self, "redis", None) is not None and getattr(self.redis, "is_enabled", lambda: True)():
-        self._load_trends_from_redis()
+        # تحميل الاتجاهات السابقة من Redis عند بدء التشغيل
+        if self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+            self._load_trends_from_redis()
 
         logger.info("🎯 TradeManager Loaded: Enhanced Trend System - التوقيت السعودي 🇸🇦")
 
@@ -241,7 +240,6 @@ class TradeManager:
                         self.redis.set_trend(symbol, new_trend)
                     except Exception as e:
                         self._handle_error(f"⚠️ خطأ في حفظ الاتجاه في Redis لـ {symbol}", e)
-
 
                 used_signals = list(pool["signals"].values())
 
@@ -487,7 +485,6 @@ class TradeManager:
         except Exception as e:
             self._handle_error(f"💥 خطأ في مسح بيانات الاتجاه لـ {symbol}", e)
             return False
-
 
     def _load_trends_from_redis(self) -> None:
         """تحميل الاتجاهات المحفوظة من Redis عند بدء التشغيل"""
