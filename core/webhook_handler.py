@@ -3,8 +3,8 @@ import re
 import logging
 from flask import request, jsonify
 from typing import Dict, Optional, Tuple, List
-from datetime import datetime
 from collections import deque
+from datetime import datetime, timedelta
 
 # 🛠️ الإصلاح: استيراد صحيح لـ saudi_time
 try:
@@ -15,7 +15,6 @@ except ImportError:
     except ImportError:
         # ✅ بديل إذا فشل الاستيراد
         import pytz
-        from datetime import datetime
         
         class SaudiTime:
             def __init__(self):
@@ -44,7 +43,12 @@ class WebhookHandler:
         self.trade_manager = trade_manager
         self.notification_manager = notification_manager
         self.cleanup_manager = cleanup_manager
-        self._error_log = []
+        self._error_log = deque(maxlen=500)  # 🔧 FIXED: استخدام deque للحد من النمو
+        
+        # 🛠️ إعداد rate limiting
+        self.request_counts = {}
+        self.rate_limit_requests = self.config.get('RATE_LIMIT_REQUESTS', 60)  # 60 طلب في الدقيقة
+        self.rate_limit_period = self.config.get('RATE_LIMIT_PERIOD', 60)  # 60 ثانية
         
         logger.info("🎯 WebhookHandler المصحح جاهز - التوقيت السعودي 🇸🇦")
 
@@ -62,6 +66,41 @@ class WebhookHandler:
             'error': full_error
         }
         self._error_log.append(error_entry)
+        
+        # 🔧 FIXED: تنظيف error_log إذا تجاوز الحد
+        if len(self._error_log) > 500:
+            excess = len(self._error_log) - 500
+            for _ in range(excess):
+                if self._error_log:
+                    self._error_log.popleft()
+
+    def _check_rate_limit(self, client_ip: str) -> bool:
+        """🔒 التحقق من معدل الطلبات"""
+        try:
+            current_time = saudi_time.now()
+            
+            # تنظيف الطلبات القديمة
+            if client_ip in self.request_counts:
+                self.request_counts[client_ip] = [
+                    req_time for req_time in self.request_counts[client_ip]
+                    if (current_time - req_time).total_seconds() < self.rate_limit_period
+                ]
+            
+            # إضافة الطلب الحالي
+            if client_ip not in self.request_counts:
+                self.request_counts[client_ip] = []
+            
+            # التحقق من الحد
+            if len(self.request_counts[client_ip]) >= self.rate_limit_requests:
+                logger.warning(f"🚫 تجاوز معدل الطلبات للعميل: {client_ip}")
+                return False
+            
+            self.request_counts[client_ip].append(current_time)
+            return True
+            
+        except Exception as e:
+            self._handle_error("💥 خطأ في rate limiting", e)
+            return True  # السماح بالطلب في حالة الخطأ
 
     def register_routes(self, app) -> None:
         """تسجيل المسارات"""
@@ -72,23 +111,32 @@ class WebhookHandler:
         app.add_url_rule("/debug/force_trade/<symbol>/<direction>", view_func=self.debug_force_trade, methods=["POST"])
         app.add_url_rule("/debug/clear_trend/<symbol>", view_func=self.debug_clear_trend, methods=["POST"])
         
+        # 🆕 إضافة مسارات إضافية للإدارة
+        app.add_url_rule("/debug/stats", view_func=self.debug_stats, methods=["GET"])
+        app.add_url_rule("/debug/cleanup_memory", view_func=self.debug_cleanup_memory, methods=["POST"])
+        
         logger.info("🔗 تم تسجيل مسارات الويب هووك والتصحيح - التوقيت السعودي 🇸🇦")
 
     def health_check(self):
         """فحص صحة النظام بالتوقيت السعودي"""
-        return jsonify({
-            "status": "healthy",
-            "timestamp": saudi_time.now().isoformat(),
-            "timezone": "Asia/Riyadh 🇸🇦",
-            "version": "12.1_saudi_time",
-            "system_metrics": {
-                "active_trades": self.trade_manager.get_active_trades_count(),
-                "pending_signals": sum(len(signals) for symbol_data in self.group_manager.pending_signals.values() 
-                                     for signals in symbol_data.values() if isinstance(signals, deque)),
-                "error_count": len(self._error_log),
-                "current_trends": len(self.trade_manager.current_trend)
-            }
-        })
+        try:
+            return jsonify({
+                "status": "healthy",
+                "timestamp": saudi_time.now().isoformat(),
+                "timezone": "Asia/Riyadh 🇸🇦",
+                "version": "12.1_saudi_time",
+                "system_metrics": {
+                    "active_trades": self.trade_manager.get_active_trades_count(),
+                    "pending_signals": sum(len(signals) for symbol_data in self.group_manager.pending_signals.values() 
+                                         for signals in symbol_data.values() if hasattr(signals, '__len__')),
+                    "error_count": len(self._error_log),
+                    "current_trends": len(self.trade_manager.current_trend),
+                    "signal_processor_stats": self.signal_processor.get_system_stats() if hasattr(self.signal_processor, 'get_system_stats') else {}
+                }
+            })
+        except Exception as e:
+            self._handle_error("💥 خطأ في health check", e)
+            return jsonify({"status": "error", "error": str(e)}), 500
 
     def debug_trend(self, symbol):
         """🔧 تصحيح حالة الاتجاه لرمز معين بالتوقيت السعودي"""
@@ -106,6 +154,7 @@ class WebhookHandler:
                 "timezone": "Asia/Riyadh 🇸🇦"
             })
         except Exception as e:
+            self._handle_error(f"💥 خطأ في debug_trend لـ {symbol}", e)
             return jsonify({"error": str(e)}), 500
 
     def debug_force_trend(self, symbol, direction):
@@ -124,6 +173,7 @@ class WebhookHandler:
                 "timezone": "Asia/Riyadh 🇸🇦"
             })
         except Exception as e:
+            self._handle_error(f"💥 خطأ في debug_force_trend لـ {symbol}", e)
             return jsonify({"error": str(e)}), 500
 
     def debug_force_trade(self, symbol, direction):
@@ -142,6 +192,7 @@ class WebhookHandler:
                 "timezone": "Asia/Riyadh 🇸🇦"
             })
         except Exception as e:
+            self._handle_error(f"💥 خطأ في debug_force_trade لـ {symbol}", e)
             return jsonify({"error": str(e)}), 500
 
     def debug_clear_trend(self, symbol):
@@ -156,6 +207,57 @@ class WebhookHandler:
                 "timezone": "Asia/Riyadh 🇸🇦"
             })
         except Exception as e:
+            self._handle_error(f"💥 خطأ في debug_clear_trend لـ {symbol}", e)
+            return jsonify({"error": str(e)}), 500
+
+    def debug_stats(self):
+        """📊 الحصول على إحصائيات النظام"""
+        try:
+            stats = {
+                "webhook_handler": {
+                    "error_log_size": len(self._error_log),
+                    "rate_limit_stats": {ip: len(times) for ip, times in self.request_counts.items()},
+                    "total_clients": len(self.request_counts)
+                },
+                "signal_processor": self.signal_processor.get_system_stats() if hasattr(self.signal_processor, 'get_system_stats') else {},
+                "trade_manager": self.trade_manager.get_system_stats() if hasattr(self.trade_manager, 'get_system_stats') else {},
+                "group_manager": self.group_manager.get_performance_metrics() if hasattr(self.group_manager, 'get_performance_metrics') else {},
+                "timestamp": saudi_time.now().isoformat(),
+                "timezone": "Asia/Riyadh 🇸🇦"
+            }
+            return jsonify(stats)
+        except Exception as e:
+            self._handle_error("💥 خطأ في debug_stats", e)
+            return jsonify({"error": str(e)}), 500
+
+    def debug_cleanup_memory(self):
+        """🧹 تنظيف ذاكرة النظام"""
+        try:
+            results = {}
+            
+            # تنظيف signal_processor
+            if hasattr(self.signal_processor, 'cleanup_memory'):
+                results['signal_processor'] = self.signal_processor.cleanup_memory()
+            
+            # تنظيف trade_manager
+            if hasattr(self.trade_manager, 'cleanup_memory'):
+                results['trade_manager'] = self.trade_manager.cleanup_memory()
+            
+            # تنظيف group_manager
+            if hasattr(self.group_manager, 'cleanup_memory'):
+                results['group_manager'] = self.group_manager.cleanup_memory()
+            
+            # تنظيف webhook_handler
+            results['webhook_handler'] = self.cleanup_memory()
+            
+            return jsonify({
+                "success": True,
+                "results": results,
+                "timestamp": saudi_time.now().isoformat(),
+                "timezone": "Asia/Riyadh 🇸🇦"
+            })
+        except Exception as e:
+            self._handle_error("💥 خطأ في debug_cleanup_memory", e)
             return jsonify({"error": str(e)}), 500
 
     def handle_webhook(self):
@@ -164,7 +266,12 @@ class WebhookHandler:
         logger.info(f"📥 📥 📥 طلب ويب هووك واردة جديدة - التوقيت: {current_time} 🇸🇦")
         
         try:
-            client_ip = request.remote_addr
+            client_ip = request.remote_addr or '0.0.0.0'
+            
+            # 🔒 تطبيق rate limiting
+            if not self._check_rate_limit(client_ip):
+                return jsonify({"error": "Rate limit exceeded"}), 429
+                
             content_type = request.headers.get('Content-Type', '')
             content_length = request.headers.get('Content-Length', 0)
             user_agent = request.headers.get('User-Agent', '')
@@ -172,7 +279,7 @@ class WebhookHandler:
             logger.info(f"🌐 معلومات الطلب: IP={client_ip}, Content-Type={content_type}, Length={content_length} - التوقيت السعودي 🇸🇦")
             
             raw_data = request.get_data(as_text=True)
-            if not raw_data:
+            if not raw_data or not raw_data.strip():
                 logger.warning("⚠️ طلب فارغ - لا توجد بيانات")
                 return jsonify({"error": "Empty request body"}), 400
             
@@ -223,13 +330,17 @@ class WebhookHandler:
             symbol = data.get('ticker') or data.get('symbol') or 'UNKNOWN'
             signal_type = data.get('signal') or data.get('action') or data.get('type') or 'UNKNOWN'
             
+            # 🔧 FIXED: معالجة أفضل للقيم
+            symbol = str(symbol).strip().upper() if symbol else 'UNKNOWN'
+            signal_type = str(signal_type).strip() if signal_type else 'UNKNOWN'
+            
             if symbol == 'UNKNOWN' or signal_type == 'UNKNOWN':
                 logger.warning(f"⚠️ رمز أو إشارة غير معروفة: symbol={symbol}, signal={signal_type}")
                 return None
                 
             result = {
-                'symbol': symbol.upper().strip(),
-                'signal_type': signal_type.strip(),
+                'symbol': symbol,
+                'signal_type': signal_type,
                 'timestamp': saudi_time.now().isoformat(),
                 'timezone': 'Asia/Riyadh 🇸🇦',
                 'raw_data': data
@@ -251,7 +362,7 @@ class WebhookHandler:
             logger.debug(f"🔍 تحليل النص الخام: {raw_data}")
             
             symbol, signal_type = self._extract_from_plaintext(raw_data)
-            if not symbol or not signal_type:
+            if not symbol or not signal_type or symbol == 'UNKNOWN' or signal_type == 'UNKNOWN':
                 logger.warning(f"⚠️ فشل استخراج الرمز والإشارة من النص: {raw_data}")
                 return None
                 
@@ -280,21 +391,24 @@ class WebhookHandler:
                 logger.warning("❌ نص الإشارة فارغ")
                 return None, None
 
-            # نمط Ticker: SYMBOL Signal: SIGNAL
-            match = re.search(r'(?i)ticker\s*:\s*([A-Z0-9]+).*?signal\s*:\s*([A-Za-z0-9_ ]+)', text)
+            # 🔧 تحسين regex ليتعامل مع المزيد من الأنماط
+            # نمط 1: Ticker: SYMBOL Signal: SIGNAL (بأي حالة)
+            match = re.search(r'(?i)ticker\s*:\s*([A-Z0-9]+).*?signal\s*:\s*([A-Za-z0-9_\-\s]+)', text, re.DOTALL)
             if match:
                 symbol, signal = match.group(1), match.group(2)
-                logger.debug(f"✅ تم الاستخراج بنمط Ticker/Signal: {symbol} -> {signal} - التوقيت السعودي 🇸🇦")
-                return symbol, signal
+                if symbol and signal:
+                    logger.debug(f"✅ تم الاستخراج بنمط Ticker/Signal: {symbol} -> {signal} - التوقيت السعودي 🇸🇦")
+                    return symbol.strip(), signal.strip()
 
-            # نمط SYMBOL SIGNAL (تحسين)
-            match = re.match(r'([A-Za-z0-9]+)\s+([A-Za-z0-9_ ]+)', text)
+            # نمط 2: SYMBOL SIGNAL (يمكن أن يحتوي على مسافات في الإشارة)
+            match = re.match(r'([A-Za-z0-9]+)\s+([A-Za-z0-9_\-\s]+)', text)
             if match:
                 symbol, signal = match.group(1), match.group(2)
-                logger.debug(f"✅ تم الاستخراج بنمط Symbol/Signal: {symbol} -> {signal} - التوقيت السعودي 🇸🇦")
-                return symbol, signal
+                if symbol and signal:
+                    logger.debug(f"✅ تم الاستخراج بنمط Symbol/Signal: {symbol} -> {signal} - التوقيت السعودي 🇸🇦")
+                    return symbol.strip(), signal.strip()
 
-            # نمط الإشارة فقط مع رمز افتراضي
+            # نمط 3: الإشارة فقط مع رمز افتراضي
             if text.strip():
                 # محاولة استخراج الرمز من بداية النص
                 words = text.split()
@@ -302,7 +416,7 @@ class WebhookHandler:
                     symbol = words[0]
                     signal = ' '.join(words[1:])
                     logger.debug(f"✅ تم الاستخراج بنمط الكلمات المتعددة: {symbol} -> {signal} - التوقيت السعودي 🇸🇦")
-                    return symbol, signal
+                    return symbol.strip(), signal.strip()
                 else:
                     logger.warning(f"⚠️ نص غير كافٍ: {text} - التوقيت السعودي 🇸🇦")
                     return "UNKNOWN", text.strip()
@@ -568,20 +682,66 @@ class WebhookHandler:
                 'symbol': signal_data.get('symbol')
             })
 
-    def get_error_log(self) -> List[str]:
+    def get_error_log(self) -> List[Dict]:
         """الحصول على سجل الأخطاء"""
-        return self._error_log.copy()
+        return list(self._error_log)
 
     def get_system_status(self) -> Dict:
         """🎯 الحصول على حالة النظام المفصلة بالتوقيت السعودي"""
-        return {
-            "status": "active",
-            "timestamp": saudi_time.now().isoformat(),
-            "timezone": "Asia/Riyadh 🇸🇦",
-            "active_trades": self.trade_manager.get_active_trades_count(),
-            "pending_signals": sum(len(signals) for symbol_data in self.group_manager.pending_signals.values() 
-                                 for signals in symbol_data.values() if hasattr(signals, '__len__')),
-            "current_trends": len(self.trade_manager.current_trend),
-            "error_count": len(self._error_log),
-            "webhook_errors": len(self._error_log)
-        }
+        try:
+            return {
+                "status": "active",
+                "timestamp": saudi_time.now().isoformat(),
+                "timezone": "Asia/Riyadh 🇸🇦",
+                "active_trades": self.trade_manager.get_active_trades_count(),
+                "pending_signals": sum(len(signals) for symbol_data in self.group_manager.pending_signals.values() 
+                                     for signals in symbol_data.values() if hasattr(signals, '__len__')),
+                "current_trends": len(self.trade_manager.current_trend),
+                "error_count": len(self._error_log),
+                "webhook_errors": len(self._error_log),
+                "rate_limit_stats": {
+                    "total_clients": len(self.request_counts),
+                    "active_requests": sum(len(times) for times in self.request_counts.values())
+                }
+            }
+        except Exception as e:
+            self._handle_error("💥 خطأ في الحصول على حالة النظام", e)
+            return {"status": "error", "error": str(e)}
+
+    def cleanup_memory(self) -> Dict:
+        """🧹 تنظيف الذاكرة وإدارة التخزين"""
+        try:
+            # تنظيف request_counts القديمة
+            current_time = saudi_time.now()
+            cleaned_ips = 0
+            for ip in list(self.request_counts.keys()):
+                self.request_counts[ip] = [
+                    req_time for req_time in self.request_counts[ip]
+                    if (current_time - req_time).total_seconds() < self.rate_limit_period * 2
+                ]
+                if not self.request_counts[ip]:
+                    del self.request_counts[ip]
+                    cleaned_ips += 1
+            
+            # تنظيف error_log إذا تجاوز الحد
+            error_log_cleaned = 0
+            if len(self._error_log) > 500:
+                error_log_cleaned = len(self._error_log) - 500
+                for _ in range(error_log_cleaned):
+                    if self._error_log:
+                        self._error_log.popleft()
+            
+            logger.info(f"🧹 تنظيف الذاكرة في webhook_handler: تم تنظيف {cleaned_ips} IP، {error_log_cleaned} خطأ - التوقيت السعودي 🇸🇦")
+            
+            return {
+                'cleaned_ips': cleaned_ips,
+                'error_log_cleaned': error_log_cleaned,
+                'current_error_log_size': len(self._error_log),
+                'current_request_counts': len(self.request_counts),
+                'timestamp': current_time.isoformat(),
+                'timezone': 'Asia/Riyadh 🇸🇦'
+            }
+            
+        except Exception as e:
+            self._handle_error("💥 خطأ في تنظيف الذاكرة", e)
+            return {'error': str(e)}

@@ -5,6 +5,7 @@ import time
 import logging
 from flask import Flask
 from datetime import datetime
+from typing import Dict, Optional
 
 from config.config_manager import ConfigManager
 from core.signal_processor import SignalProcessor
@@ -37,13 +38,24 @@ class TradingSystem:
         
         self.config_manager = ConfigManager()
         self.config = self.config_manager.config
-        self.signals = self.config_manager.signals  # 🛠️ حفظ المرجع للإشارات
-        self.keywords = self.config_manager.keywords
         self.port = self.config_manager.port
 
-        # ✅ التحقق من اكتمال الإعدادات الأساسية أولاً
-        if not self.config or not self.signals:
-            raise ValueError("❌ فشل تحميل الإعدادات أو الإشارات")
+        # 🔧 FIXED: التحقق من اكتمال الإعدادات الأساسية أولاً
+        if not self.config:
+            raise ValueError("❌ فشل تحميل الإعدادات")
+        
+        # 🔧 FIXED: التحقق من وجود الإشارات وتحقيق الحد الأدنى
+        self.signals = self.config_manager.signals
+        if not self.signals or len(self.signals) == 0:
+            logger.error("❌ فشل تحميل أي إشارات")
+            raise ValueError("❌ فشل تحميل الإشارات")
+        
+        # حساب إجمالي الإشارات المحملة
+        total_signals = sum(len(signal_list) for signal_list in self.signals.values() if signal_list)
+        if total_signals == 0:
+            logger.warning("⚠️ تم تحميل الإشارات ولكنها فارغة")
+        
+        self.keywords = self.config_manager.keywords
         
         # 🛠️ التحقق النهائي من إعدادات الخادم الخارجي
         logger.info(f"🔍 تحقق نهائي - EXTERNAL_SERVER_ENABLED: {self.config['EXTERNAL_SERVER_ENABLED']}")
@@ -111,6 +123,22 @@ class TradingSystem:
         @self.app.route('/signal_stats/<symbol>')
         def signal_stats(symbol):
             return self.get_signal_statistics(symbol)
+        
+        # 🔧 FIXED: إضافة مسار للصحة والاستعداد
+        @self.app.route('/health')
+        def health():
+            return {
+                "status": "healthy",
+                "timestamp": datetime.now().isoformat(),
+                "services": {
+                    "config_manager": bool(self.config),
+                    "signal_processor": bool(self.signal_processor),
+                    "trade_manager": bool(self.trade_manager),
+                    "group_manager": bool(self.group_manager),
+                    "notification_manager": bool(self.notification_manager),
+                    "webhook_handler": bool(self.webhook_handler)
+                }
+            }
             
         logger.info("✅ تم تهيئة تطبيق Flask والمسارات بنجاح")
 
@@ -159,8 +187,11 @@ class TradingSystem:
         logger.info("\n📊 Loaded Signals Summary:")
         total_signals = 0
         for category, signals in self.signals.items():
-            logger.info(f"   📁 {category}: {len(signals)} signals")
-            total_signals += len(signals)
+            if signals:
+                logger.info(f"   📁 {category}: {len(signals)} signals")
+                total_signals += len(signals)
+            else:
+                logger.info(f"   📁 {category}: ❌ NO SIGNALS")
 
         logger.info(f"\n📈 Total signals loaded: {total_signals}")
         
@@ -178,19 +209,31 @@ class TradingSystem:
 
     def get_system_status(self):
         """🎯 Get system status"""
-        return {
-            "status": "active",
-            "version": "11.0_detailed_trend_with_group4_group5",
-            "timestamp": datetime.now().isoformat(),
-            "port": self.port,
-            "trading_mode": self.config['TRADING_MODE'],
-            "group1_trend_mode": self.config['GROUP1_TREND_MODE'],
-            "group2_enabled": self.config['GROUP2_ENABLED'],
-            "group3_enabled": self.config['GROUP3_ENABLED'],
-            "group4_enabled": self.config['GROUP4_ENABLED'],
-            "group5_enabled": self.config['GROUP5_ENABLED'],
-            "detailed_trend_notifications": bool(self.trade_manager.group_manager and self.trade_manager.notification_manager)
-        }
+        try:
+            # 🔧 FIXED: التحقق من وجود المديرين قبل الوصول إليهم
+            trade_manager_active = hasattr(self.trade_manager, 'group_manager') and self.trade_manager.group_manager is not None
+            notification_manager_active = hasattr(self.trade_manager, 'notification_manager') and self.trade_manager.notification_manager is not None
+            
+            return {
+                "status": "active",
+                "version": "11.0_detailed_trend_with_group4_group5",
+                "timestamp": datetime.now().isoformat(),
+                "port": self.port,
+                "trading_mode": self.config.get('TRADING_MODE', 'UNKNOWN'),
+                "group1_trend_mode": self.config.get('GROUP1_TREND_MODE', 'UNKNOWN'),
+                "group2_enabled": self.config.get('GROUP2_ENABLED', False),
+                "group3_enabled": self.config.get('GROUP3_ENABLED', False),
+                "group4_enabled": self.config.get('GROUP4_ENABLED', False),
+                "group5_enabled": self.config.get('GROUP5_ENABLED', False),
+                "detailed_trend_notifications": trade_manager_active and notification_manager_active
+            }
+        except Exception as e:
+            logger.error(f"❌ Error in get_system_status: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
 
     def get_signal_statistics(self, symbol: str):
         """🆕 الحصول على إحصائيات الإشارات لرمز معين"""
@@ -203,3 +246,87 @@ class TradingSystem:
             }
         except Exception as e:
             return {"error": f"Failed to get signal statistics: {str(e)}"}
+
+    def run(self):
+        """تشغيل النظام"""
+        try:
+            logger.info(f"🚀 بدء تشغيل نظام التداول على المنفذ {self.port}")
+            
+            # 🔧 FIXED: إضافة معالجة للإغلاق النظيف
+            import signal
+            import sys
+            
+            def signal_handler(sig, frame):
+                logger.info("🛑 استقبال إشارة إغلاق، جاري الإغلاق النظيف...")
+                self.shutdown()
+                sys.exit(0)
+            
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            
+            self.app.run(
+                host='0.0.0.0', 
+                port=self.port, 
+                debug=self.config.get('DEBUG', False),
+                use_reloader=False
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ فشل تشغيل النظام: {e}")
+            raise
+
+    def shutdown(self):
+        """إغلاق النظام بشكل نظيف"""
+        logger.info("🧹 جاري إغلاق النظام بشكل نظيف...")
+        
+        try:
+            # إغلاق جميع المديرين
+            if hasattr(self.trade_manager, 'cleanup_memory'):
+                self.trade_manager.cleanup_memory()
+            
+            if hasattr(self.group_manager, 'cleanup_memory'):
+                self.group_manager.cleanup_memory()
+            
+            if hasattr(self.signal_processor, 'cleanup_memory'):
+                self.signal_processor.cleanup_memory()
+            
+            if hasattr(self.webhook_handler, 'cleanup_memory'):
+                self.webhook_handler.cleanup_memory()
+            
+            logger.info("✅ تم إغلاق النظام بنجاح")
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في إغلاق النظام: {e}")
+
+    def reload_configuration(self):
+        """إعادة تحميل الإعدادات"""
+        try:
+            logger.info("🔄 محاولة إعادة تحميل الإعدادات...")
+            
+            # 🔧 FIXED: محاولة إعادة تحميل config_manager
+            if hasattr(self.config_manager, 'reload_config'):
+                success = self.config_manager.reload_config()
+                if success:
+                    # تحديث الإعدادات في جميع المديرين
+                    self.config = self.config_manager.config
+                    self.signals = self.config_manager.signals
+                    self.keywords = self.config_manager.keywords
+                    
+                    # تحديث signal_processor
+                    if self.signal_processor:
+                        self.signal_processor.signals = self.signals
+                        self.signal_processor.keywords = self.keywords
+                        self.signal_processor.setup_signal_index()
+                    
+                    logger.info("✅ تم إعادة تحميل الإعدادات بنجاح")
+                    return True
+                else:
+                    logger.error("❌ فشل إعادة تحميل الإعدادات")
+                    return False
+            else:
+                logger.warning("⚠️ config_manager لا يدعم إعادة التحميل")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في إعادة تحميل الإعدادات: {e}")
+            return False

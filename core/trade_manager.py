@@ -28,6 +28,7 @@ except ImportError:
                 return dt.strftime('%Y-%m-%d %I:%M:%S %p')
         
         saudi_time = SaudiTime()
+        logging.warning("⚠️ استخدام SaudiTime البديل بسبب مشكلة الاستيراد")
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +39,12 @@ except ImportError:
         from ..utils.redis_helper import RedisManager
     except ImportError:
         RedisManager = None
+        logger.warning("⚠️ RedisManager غير متوفر")
 
 
 class TradeManager:
     """
-    🎯 نظام اتجاه محسّن - بالتوقيت السعودي
+    🎯 نظام اتجاه محسّن - بالتوقيت السعودي - الإصدار المصحح
     """
 
     def __init__(self, config):
@@ -63,29 +65,33 @@ class TradeManager:
         self.last_reported_trend = {}
         self.trend_strength = {}
         self.trend_signals_count = defaultdict(int)
-        self.trend_history = defaultdict(list)
+        self.trend_history = defaultdict(lambda: deque(maxlen=50))  # 🔧 FIXED: حد أقصى 50 سجل
 
         # Trend pool
         self.trend_pool = {}
 
         self.group_manager = None
         self.notification_manager = None
-        self._error_log = []
+        self._error_log = deque(maxlen=500)  # 🔧 FIXED: حد أقصى 500 خطأ
 
         # 🔗 تكامل Redis لتخزين الاتجاهات بشكل دائم
         self.redis = None
+        self.redis_enabled = False
         try:
             if RedisManager is not None:
                 self.redis = RedisManager()
+                # 🔧 FIXED: القيمة الافتراضية الصحيحة هي False
+                self.redis_enabled = getattr(self.redis, "is_enabled", lambda: False)()
         except Exception as e:
             logger.error("⚠️ تعذر تهيئة RedisManager", exc_info=True)
             self.redis = None
+            self.redis_enabled = False
 
         # تحميل الاتجاهات السابقة من Redis عند بدء التشغيل
-        if self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+        if self.redis_enabled:
             self._load_trends_from_redis()
 
-        logger.info("🎯 TradeManager Loaded: Enhanced Trend System - التوقيت السعودي 🇸🇦")
+        logger.info("🎯 TradeManager المصحح جاهز: Enhanced Trend System - التوقيت السعودي 🇸🇦")
 
     def set_group_manager(self, gm):
         self.group_manager = gm
@@ -94,11 +100,12 @@ class TradeManager:
         self.notification_manager = nm
 
     def open_trade(self, symbol, direction, strategy_type="GROUP1", mode_key="TRADING_MODE"):
+        """🔧 FIXED: فتح صفقة مع تحديث العدادات فقط بعد النجاح"""
         with self.trade_lock:
             try:
                 # 🔴 استخدام القيم من الإعدادات فقط بدون افتراضيات
-                max_open_trades = self.config["MAX_OPEN_TRADES"]
-                max_per_symbol = self.config["MAX_TRADES_PER_SYMBOL"]
+                max_open_trades = self.config.get("MAX_OPEN_TRADES", 20)
+                max_per_symbol = self.config.get("MAX_TRADES_PER_SYMBOL", 20)
                 
                 # التحقق من الحدود العالمية
                 current_total = len(self.active_trades)
@@ -117,8 +124,8 @@ class TradeManager:
                 timestamp = saudi_time.now().strftime('%Y%m%d_%H%M%S_%f')
                 trade_id = f"{symbol}_{mode_key}_{self.total_trade_counter}_{timestamp}"
 
-                # تسجيل الصفقة
-                self.active_trades[trade_id] = {
+                # 🔧 FIXED: إنشاء بيانات الصفقة أولاً
+                trade_data = {
                     "symbol": symbol,
                     "side": direction,
                     "strategy_type": strategy_type,
@@ -129,7 +136,15 @@ class TradeManager:
                     "timezone": "Asia/Riyadh 🇸🇦"
                 }
 
-                # 🔴 تحديث العداد بدقة
+                # محاولة فتح الصفقة (يمكن إضافة منطق تنفيذ حقيقي هنا)
+                open_success = self._execute_trade_open(trade_data)
+                
+                if not open_success:
+                    logger.error(f"❌ فشل تنفيذ فتح الصفقة: {symbol}")
+                    return False
+
+                # 🔧 FIXED: فقط بعد نجاح فتح الصفقة نقوم بالتحديث
+                self.active_trades[trade_id] = trade_data
                 self.symbol_trade_count[symbol] = current_symbol_count + 1
                 self.metrics["trades_opened"] += 1
 
@@ -139,6 +154,17 @@ class TradeManager:
             except Exception as e:
                 self._handle_error("💥 خطأ في فتح الصفقة", e)
                 return False
+
+    def _execute_trade_open(self, trade_data: Dict) -> bool:
+        """🔧 NEW: تنفيذ فتح الصفقة الفعلي (يمكن تخصيصه حسب الوسيط)"""
+        try:
+            # هنا يمكن إضافة منطق الاتصال بالوسيط
+            # للآن نعيد True كنموذج
+            logger.debug(f"📤 تنفيذ فتح الصفقة: {trade_data['symbol']} - {trade_data['side']}")
+            return True
+        except Exception as e:
+            self._handle_error("💥 خطأ في تنفيذ فتح الصفقة", e)
+            return False
 
     def close_trade(self, trade_id):
         with self.trade_lock:
@@ -196,7 +222,7 @@ class TradeManager:
             signal_type = signal_data["signal_type"]
             logger.info(f"🎯 معالجة إشارة اتجاه لـ {symbol}: {signal_data['signal_type']} - التوقيت السعودي 🇸🇦")
 
-            # 🔧 تهيئة المخزن إذا لم يكن موجوداً
+            # 🔧 FIXED: تهيئة المخزن إذا لم يكن موجوداً
             if symbol not in self.trend_pool:
                 self.trend_pool[symbol] = {
                     "direction": direction,
@@ -222,12 +248,18 @@ class TradeManager:
                     "timestamp": saudi_time.now(),
                     "timezone": "Asia/Riyadh 🇸🇦"
                 }
-                self.trend_signals_count[symbol] = len(pool["signals"])
+                # 🔧 FIXED: التحقق من وجود signals قبل حساب الطول
+                if pool.get("signals"):
+                    self.trend_signals_count[symbol] = len(pool["signals"])
                 logger.info(f"➕ إضافة إشارة جديدة: {signal_type} (الإجمالي: {self.trend_signals_count[symbol]}) - التوقيت السعودي 🇸🇦")
 
             # ✅ التحقق من اكتمال الاتجاه
-            required_signals = self.config['TREND_CHANGE_THRESHOLD']
-            if len(pool["signals"]) >= required_signals:
+            required_signals = self.config.get('TREND_CHANGE_THRESHOLD', 2)
+            
+            # 🔧 FIXED: التحقق من وجود signals وحساب الطول بشكل آمن
+            current_signals_count = len(pool.get("signals", {}))
+            
+            if current_signals_count >= required_signals:
                 new_trend = direction
                 trend_changed = old_trend != new_trend
                 
@@ -235,31 +267,31 @@ class TradeManager:
                 self.last_reported_trend[symbol] = new_trend
 
                 # حفظ الاتجاه بشكل دائم في Redis
-                if self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+                if self.redis_enabled:
                     try:
                         self.redis.set_trend(symbol, new_trend)
                     except Exception as e:
                         self._handle_error(f"⚠️ خطأ في حفظ الاتجاه في Redis لـ {symbol}", e)
 
-                used_signals = list(pool["signals"].values())
+                used_signals = list(pool.get("signals", {}).values())
 
                 # 📝 تسجيل تاريخ الاتجاه
                 self.trend_history[symbol].append({
                     'timestamp': saudi_time.now(),
                     'old_trend': old_trend,
                     'new_trend': new_trend,
-                    'signals_used': [s['signal_type'] for s in used_signals],
+                    'signals_used': [s.get('signal_type', '') for s in used_signals],
                     'timezone': 'Asia/Riyadh 🇸🇦'
                 })
 
                 if trend_changed:
-                    logger.info(f"📈 تغيير اتجاه مكتمل: {symbol} → {new_trend} ({len(used_signals)} إشارات) - التوقيت السعودي 🇸🇦")
+                    logger.info(f"📈 تغيير اتجاه مكتمل: {symbol} → {new_trend} ({current_signals_count} إشارات) - التوقيت السعودي 🇸🇦")
                 else:
-                    logger.info(f"📊 تأكيد اتجاه: {symbol} → {new_trend} ({len(used_signals)} إشارات) - التوقيت السعودي 🇸🇦")
+                    logger.info(f"📊 تأكيد اتجاه: {symbol} → {new_trend} ({current_signals_count} إشارات) - التوقيت السعودي 🇸🇦")
 
                 # 🧹 إعادة التعيين بعد اكتمال الاتجاه
                 pool["signals"] = {}
-                self.trend_strength[symbol] = len(used_signals)
+                self.trend_strength[symbol] = current_signals_count
 
                 return trend_changed, old_trend, used_signals
 
@@ -413,23 +445,36 @@ class TradeManager:
             'timezone': 'Asia/Riyadh 🇸🇦',
             'error': full
         })
+        
+        # 🔧 FIXED: تنظيف error_log إذا تجاوز الحد
+        if len(self._error_log) > 500:
+            excess = len(self._error_log) - 500
+            for _ in range(excess):
+                if self._error_log:
+                    self._error_log.popleft()
 
     def get_error_log(self):
-        return self._error_log
+        return list(self._error_log)
 
     def get_trend_status(self, symbol: str) -> Dict:
         """الحصول على حالة الاتجاه المفصلة بالتوقيت السعودي"""
-        return {
-            'symbol': symbol,
-            'current_trend': self.current_trend.get(symbol, "UNKNOWN"),
-            'last_reported': self.last_reported_trend.get(symbol, "UNKNOWN"),
-            'trend_strength': self.trend_strength.get(symbol, 0),
-            'signals_count': self.trend_signals_count.get(symbol, 0),
-            'trend_pool_size': len(self.trend_pool.get(symbol, {}).get('signals', {})),
-            'active_trades': self.get_active_trades_count(symbol),
-            'trend_history_count': len(self.trend_history.get(symbol, [])),
-            'timezone': 'Asia/Riyadh 🇸🇦'
-        }
+        try:
+            pool_signals = self.trend_pool.get(symbol, {}).get('signals', {})
+            return {
+                'symbol': symbol,
+                'current_trend': self.current_trend.get(symbol, "UNKNOWN"),
+                'last_reported': self.last_reported_trend.get(symbol, "UNKNOWN"),
+                'trend_strength': self.trend_strength.get(symbol, 0),
+                'signals_count': self.trend_signals_count.get(symbol, 0),
+                'trend_pool_size': len(pool_signals),
+                'active_trades': self.get_active_trades_count(symbol),
+                'trend_history_count': len(self.trend_history.get(symbol, [])),
+                'redis_enabled': self.redis_enabled,
+                'timezone': 'Asia/Riyadh 🇸🇦'
+            }
+        except Exception as e:
+            self._handle_error(f"💥 خطأ في الحصول على حالة الاتجاه لـ {symbol}", e)
+            return {'error': str(e), 'symbol': symbol}
 
     def force_trend_change(self, symbol: str, new_trend: str) -> bool:
         """تغيير الاتجاه قسراً"""
@@ -444,7 +489,7 @@ class TradeManager:
             self._reset_trend_pool(symbol)
 
             # حفظ الاتجاه القسري في Redis
-            if self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+            if self.redis_enabled:
                 try:
                     self.redis.set_trend(symbol, new_trend)
                 except Exception as e:
@@ -457,8 +502,13 @@ class TradeManager:
 
     def get_trend_history(self, symbol: str, limit: int = 5) -> List[Dict]:
         """الحصول على سجل الاتجاه"""
-        history = self.trend_history.get(symbol, [])
-        return history[-limit:] if limit else history
+        try:
+            history = self.trend_history.get(symbol, deque())
+            history_list = list(history)
+            return history_list[-limit:] if limit and history_list else history_list
+        except Exception as e:
+            self._handle_error(f"💥 خطأ في الحصول على سجل الاتجاه لـ {symbol}", e)
+            return []
 
     def clear_trend_data(self, symbol: str) -> bool:
         """مسح بيانات الاتجاه لرمز معين"""
@@ -466,15 +516,19 @@ class TradeManager:
             keys_to_clear = [
                 self.current_trend, self.previous_trend, self.last_reported_trend, 
                 self.trend_strength, self.trend_signals_count,
-                self.trend_pool, self.trend_history
+                self.trend_pool
             ]
             
             for data_dict in keys_to_clear:
                 if symbol in data_dict:
                     del data_dict[symbol]
 
+            # مسح trend_history
+            if symbol in self.trend_history:
+                del self.trend_history[symbol]
+
             # مسح بيانات الاتجاه من Redis أيضاً
-            if self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+            if self.redis_enabled:
                 try:
                     self.redis.clear_trend(symbol)
                 except Exception as e:
@@ -489,7 +543,7 @@ class TradeManager:
     def _load_trends_from_redis(self) -> None:
         """تحميل الاتجاهات المحفوظة من Redis عند بدء التشغيل"""
         try:
-            if self.redis is None or not getattr(self.redis, "is_enabled", lambda: True)():
+            if not self.redis_enabled:
                 return
             trends = self.redis.get_all_trends()
             if not trends:
@@ -505,7 +559,7 @@ class TradeManager:
         """الحصول على الاتجاه الحالي مع استخدام Redis كمصدر دائم"""
         try:
             trend = self.current_trend.get(symbol, "UNKNOWN")
-            if trend == "UNKNOWN" and self.redis is not None and getattr(self.redis, "is_enabled", lambda: True)():
+            if trend == "UNKNOWN" and self.redis_enabled:
                 saved = self.redis.get_trend(symbol)
                 if saved:
                     self.current_trend[symbol] = saved
@@ -520,9 +574,87 @@ class TradeManager:
         return {
             'symbol': symbol,
             'current_trades': self.symbol_trade_count.get(symbol, 0),
-            'max_per_symbol': self.config["MAX_TRADES_PER_SYMBOL"],
+            'max_per_symbol': self.config.get("MAX_TRADES_PER_SYMBOL", 20),
             'total_trades': len(self.active_trades),
-            'max_total_trades': self.config["MAX_OPEN_TRADES"],
-            'can_open_more': self.symbol_trade_count.get(symbol, 0) < self.config["MAX_TRADES_PER_SYMBOL"],
+            'max_total_trades': self.config.get("MAX_OPEN_TRADES", 20),
+            'can_open_more': self.symbol_trade_count.get(symbol, 0) < self.config.get("MAX_TRADES_PER_SYMBOL", 20),
+            'redis_enabled': self.redis_enabled,
+            'timezone': 'Asia/Riyadh 🇸🇦'
+        }
+
+    def cleanup_memory(self) -> Dict:
+        """🧹 تنظيف الذاكرة وإدارة التخزين"""
+        try:
+            # تنظيف trend_history القديم
+            cleaned_history = 0
+            current_time = saudi_time.now()
+            one_week_ago = current_time - timedelta(days=7)
+            
+            for symbol in list(self.trend_history.keys()):
+                history = self.trend_history[symbol]
+                initial_count = len(history)
+                
+                # الاحتفاظ فقط بالسجلات الحديثة (آخر 50)
+                while len(history) > 50:
+                    history.popleft()
+                
+                cleaned_history += (initial_count - len(history))
+            
+            # تنظيف error_log
+            error_log_cleaned = 0
+            if len(self._error_log) > 500:
+                error_log_cleaned = len(self._error_log) - 500
+                for _ in range(error_log_cleaned):
+                    if self._error_log:
+                        self._error_log.popleft()
+            
+            # تنظيف trend_pool القديم
+            pool_cleaned = 0
+            for symbol in list(self.trend_pool.keys()):
+                pool = self.trend_pool[symbol]
+                signals = pool.get('signals', {})
+                
+                # حذف الإشارات القديمة جداً
+                old_signals = []
+                for signal_key, signal_data in signals.items():
+                    timestamp = signal_data.get('timestamp')
+                    if timestamp and hasattr(timestamp, 'timestamp'):
+                        if timestamp.timestamp() < one_week_ago.timestamp():
+                            old_signals.append(signal_key)
+                
+                for signal_key in old_signals:
+                    del signals[signal_key]
+                    pool_cleaned += 1
+                
+                # إذا كانت الإشارات فارغة، حذف الرمز
+                if not signals:
+                    del self.trend_pool[symbol]
+            
+            logger.info(f"🧹 تنظيف الذاكرة: تم تنظيف {cleaned_history} سجل اتجاه، {error_log_cleaned} خطأ، {pool_cleaned} إشارة - التوقيت السعودي 🇸🇦")
+            
+            return {
+                'history_cleaned': cleaned_history,
+                'error_log_cleaned': error_log_cleaned,
+                'pool_signals_cleaned': pool_cleaned,
+                'timestamp': current_time.isoformat(),
+                'timezone': 'Asia/Riyadh 🇸🇦'
+            }
+            
+        except Exception as e:
+            self._handle_error("💥 خطأ في تنظيف الذاكرة", e)
+            return {'error': str(e)}
+
+    def get_system_stats(self) -> Dict:
+        """📊 الحصول على إحصائيات النظام"""
+        return {
+            'active_trades': len(self.active_trades),
+            'symbol_trade_counts': dict(self.symbol_trade_count),
+            'total_trades_counter': self.total_trade_counter,
+            'metrics': self.metrics,
+            'current_trends_count': len(self.current_trend),
+            'trend_history_total': sum(len(history) for history in self.trend_history.values()),
+            'error_log_size': len(self._error_log),
+            'redis_enabled': self.redis_enabled,
+            'timestamp': saudi_time.now().isoformat(),
             'timezone': 'Asia/Riyadh 🇸🇦'
         }

@@ -30,6 +30,7 @@ except ImportError:
                 return dt.strftime('%Y-%m-%d %I:%M:%S %p')
         
         saudi_time = SaudiTime()
+        logging.warning("⚠️ استخدام SaudiTime البديل بسبب مشكلة الاستيراد")
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,8 @@ class GroupManager:
         self.signal_lock = threading.RLock()
         
         # 🎯 FIXED: استخدام إعدادات منع التكرار من ملف .env فقط
-        self.duplicate_block_time = self.config['DUPLICATE_SIGNAL_BLOCK_TIME']
-        self.duplicate_cleanup_interval = self.config['DUPLICATE_CLEANUP_INTERVAL']
+        self.duplicate_block_time = self.config.get('DUPLICATE_SIGNAL_BLOCK_TIME', 15)
+        self.duplicate_cleanup_interval = self.config.get('DUPLICATE_CLEANUP_INTERVAL', 30)
         
         # 🔥 NEW: جميع العوامل الزمنية من .env
         self.cleanup_factor = self.config.get('CLEANUP_FACTOR', 1.5)
@@ -67,6 +68,10 @@ class GroupManager:
         
         # 🎯 NEW: تتبع الإشارات المستخدمة في الصفقات المفتوحة
         self.used_signals_for_trades = defaultdict(set)
+        
+        # 🎯 FIXED: إضافة متغيرات المراقبة
+        self.memory_usage_log = deque(maxlen=100)
+        self.last_cleanup_time = saudi_time.now()
         
         logger.info(f"🎯 نظام المجموعات المصحح جاهز - جميع الإعدادات من .env - التوقيت السعودي 🇸🇦")
         logger.info(f"⏰ إعدادات التوقيت: Block={self.duplicate_block_time}s, Cleanup={self.duplicate_cleanup_interval}s")
@@ -90,6 +95,10 @@ class GroupManager:
     def _is_group_enabled(self, group_type: str) -> bool:
         """التحقق من تفعيل المجموعة"""
         try:
+            # 🔧 FIXED: تحسين معالجة نوع المجموعة
+            if not group_type or not isinstance(group_type, str):
+                return False
+                
             group_key = group_type.split('_')[0].upper()
             enabled_key = f"{group_key}_ENABLED"
             is_enabled = self.config.get(enabled_key, False)
@@ -157,13 +166,18 @@ class GroupManager:
             return []
 
     def _check_trend_alignment_enhanced(self, symbol: str, direction: str, group_type: str) -> bool:
-        """✅ FIXED: التحقق من محاذاة الاتجاه بشكل آمن"""
+        """✅ FIXED: التحقق من محاذاة الاتجاه بشكل آمن مع التحقق من وجود trade_manager"""
         
         try:
+            # 🔧 FIXED: التحقق من وجود trade_manager
+            if not hasattr(self, 'trade_manager') or self.trade_manager is None:
+                logger.error("❌ trade_manager غير متوفر للتحقق من الاتجاه")
+                return False
+            
             group_key = group_type.split('_')[0]
             
-            if not self._is_group_enabled(group_type):
-                logger.warning(f"🚫 المجموعة {group_key} معطلة - تجاهل الإشارة")
+            if not group_key or not self._is_group_enabled(group_type):
+                logger.warning(f"🚫 المجموعة {group_key} معطلة أو غير صالحة - تجاهل الإشارة")
                 return False
             
             trend_mode_key = f"{group_key.upper()}_TREND_MODE"
@@ -258,7 +272,8 @@ class GroupManager:
     def _get_group_direction(self, group_num: int, signal_data: Dict) -> Tuple[Optional[str], Optional[str]]:
         """✅ OPTIMIZED: دالة محسنة لتحديد اتجاه المجموعات"""
         try:
-            if not self._is_group_enabled(f'group{group_num}'):
+            group_name = f'group{group_num}'
+            if not self._is_group_enabled(group_name):
                 return None, None
                 
             signal_type = signal_data.get('signal_type', '').lower()
@@ -403,7 +418,7 @@ class GroupManager:
 
     def _handle_contrarian_signal(self, symbol: str, group_type: str, signal_data: Dict) -> None:
         """معالجة الإشارة المخالفة للاتجاه"""
-        store_contrarian = self.config['STORE_CONTRARIAN_SIGNALS']
+        store_contrarian = self.config.get('STORE_CONTRARIAN_SIGNALS', False)
         if store_contrarian:
             logger.info(f"📦 الإشارة مخالفة للاتجاه - تم تخزينها: {symbol} → {signal_data['signal_type']} - التوقيت السعودي 🇸🇦")
         else:
@@ -435,7 +450,7 @@ class GroupManager:
                     trade_results.append(trade_result)
             
             if trade_results:
-                self._reset_used_signals(symbol, direction, trade_results)
+                self._reset_used_signals_after_trade(symbol, direction, trade_results)
             
             return trade_results
             
@@ -475,9 +490,9 @@ class GroupManager:
         """الحصول على الأنماط المفعلة"""
         active_modes = ['TRADING_MODE']
         
-        if self.config['TRADING_MODE1_ENABLED']:
+        if self.config.get('TRADING_MODE1_ENABLED', False):
             active_modes.append('TRADING_MODE1')
-        if self.config['TRADING_MODE2_ENABLED']:
+        if self.config.get('TRADING_MODE2_ENABLED', False):
             active_modes.append('TRADING_MODE2')
         
         logger.info(f"🎯 الأنماط المفعلة: {active_modes} - التوقيت السعودي 🇸🇦")
@@ -577,22 +592,27 @@ class GroupManager:
     def _can_open_trade(self, symbol: str, mode_key: str) -> bool:
         """التحقق من إمكانية فتح صفقة جديدة"""
         try:
+            # 🔧 FIXED: التحقق من وجود trade_manager
+            if not hasattr(self, 'trade_manager') or self.trade_manager is None:
+                logger.error("❌ trade_manager غير متوفر للتحقق من إمكانية فتح الصفقة")
+                return False
+            
             current_count = self.trade_manager.get_active_trades_count(symbol)
-            max_per_symbol = self.config['MAX_TRADES_PER_SYMBOL']
+            max_per_symbol = self.config.get('MAX_TRADES_PER_SYMBOL', 20)
             if current_count >= max_per_symbol:
                 logger.warning(f"🚫 وصل الحد الأقصى للصفقات للرمز {symbol}: {current_count}/{max_per_symbol} - التوقيت السعودي 🇸🇦")
                 return False
             
             total_trades = self.trade_manager.get_active_trades_count()
-            max_open_trades = self.config['MAX_OPEN_TRADES']
+            max_open_trades = self.config.get('MAX_OPEN_TRADES', 20)
             if total_trades >= max_open_trades:
                 logger.warning(f"🚫 وصل الحد الأقصى الإجمالي للصفقات: {total_trades}/{max_open_trades} - التوقيت السعودي 🇸🇦")
                 return False
             
             mode_limits = {
-                'TRADING_MODE': self.config['MAX_TRADES_MODE_MAIN'],
-                'TRADING_MODE1': self.config['MAX_TRADES_MODE1'],
-                'TRADING_MODE2': self.config['MAX_TRADES_MODE2']
+                'TRADING_MODE': self.config.get('MAX_TRADES_MODE_MAIN', 20),
+                'TRADING_MODE1': self.config.get('MAX_TRADES_MODE1', 5),
+                'TRADING_MODE2': self.config.get('MAX_TRADES_MODE2', 5)
             }
             
             current_mode_trades = self.trade_manager.count_trades_by_mode(symbol, mode_key)
@@ -687,6 +707,11 @@ class GroupManager:
     def _open_trade(self, symbol: str, direction: str, strategy_type: str, mode_key: str) -> bool:
         """فتح صفقة جديدة"""
         try:
+            # 🔧 FIXED: التحقق من وجود trade_manager
+            if not hasattr(self, 'trade_manager') or self.trade_manager is None:
+                logger.error("❌ trade_manager غير متوفر لفتح الصفقة")
+                return False
+            
             success = self.trade_manager.open_trade(symbol, direction, strategy_type, mode_key)
             
             if success:
@@ -707,7 +732,7 @@ class GroupManager:
             return False
 
     def _reset_used_signals_after_trade(self, symbol: str, direction: str, required_groups: List[str]) -> None:
-        """🎯 تنظيف الإشارات المستخدمة بعد فتح الصفقة بنجاح"""
+        """🎯 تنظيف الإشارات المستخدمة بعد فتح الصفقة بنجاح - الإصدار المصحح"""
         try:
             group_key = symbol.upper().strip()
             if group_key not in self.pending_signals:
@@ -723,7 +748,7 @@ class GroupManager:
                 
                 if group_type in groups and groups[group_type]:
                     # 🧹 مسح جميع الإشارات المستخدمة في هذه الصفقة
-                    original_count = len(groups[group_type])
+                    original_count = len(groups[group_type])  # 🔧 FIXED: تعريف هنا
                     groups[group_type].clear()
                     logger.info(f"🧹 تم تنظيف {original_count} إشارة من {group_type} بعد فتح الصفقة")
             
@@ -733,7 +758,7 @@ class GroupManager:
             self._handle_error(f"⚠️ خطأ في تنظيف الإشارات بعد الصفقة", e)
 
     def _reset_used_signals(self, symbol: str, direction: str, trade_results: List[Dict]) -> None:
-        """🎯 FIXED: إعادة تعيين الإشارات المستخدمة باستخدام الإعدادات من .env"""
+        """🎯 FIXED: إعادة تعيين الإشارات المستخدمة باستخدام الإعدادات من .env - الإصدار المصحح"""
         try:
             group_key = symbol.upper().strip()
             if group_key not in self.pending_signals:
@@ -754,6 +779,9 @@ class GroupManager:
                     if group_type in groups and groups[group_type]:
                         # 🎯 استخدام عتبة التنظيف من .env بدلاً من القيمة الثابتة
                         retention_threshold = self.signal_cleanup_threshold
+                        
+                        # 🔧 FIXED: تعريف original_count هنا
+                        original_count = len(groups[group_type])
                         
                         groups[group_type] = deque(
                             [signal for signal in groups[group_type]
@@ -846,6 +874,11 @@ class GroupManager:
                 'cleanup_factor': self.cleanup_factor,
                 'signal_ttl_minutes': self.signal_ttl_minutes,
                 'signal_cleanup_threshold': self.signal_cleanup_threshold
+            },
+            'memory_usage': {
+                'pending_signals_count': len(self.pending_signals),
+                'error_log_size': len(self.error_log),
+                'signal_hashes_size': len(self.signal_hashes)
             }
         }
 
@@ -853,6 +886,12 @@ class GroupManager:
         """فتح صفقة قسراً بالتوقيت السعودي"""
         try:
             logger.info(f"🔧 محاولة فتح صفقة قسراً: {symbol} - {direction} - {strategy_type} - التوقيت السعودي 🇸🇦")
+            
+            # 🔧 FIXED: التحقق من وجود trade_manager
+            if not hasattr(self, 'trade_manager') or self.trade_manager is None:
+                logger.error("❌ trade_manager غير متوفر لفتح الصفقة القسرية")
+                return False
+                
             success = self.trade_manager.open_trade(symbol, direction, strategy_type, mode_key)
             
             if success:
@@ -865,3 +904,57 @@ class GroupManager:
         except Exception as e:
             self._handle_error(f"💥 خطأ في فتح الصفقة القسرية لـ {symbol}", e)
             return False
+
+    def cleanup_memory(self) -> Dict:
+        """🧹 تنظيف الذاكرة وإدارة التخزين"""
+        try:
+            initial_total = sum(
+                len(self.pending_signals[symbol][gt]) 
+                for symbol in self.pending_signals 
+                for gt in self.pending_signals[symbol] 
+                if gt not in ['created_at', 'updated_at']
+            )
+            
+            # تنظيف الإشارات المنتهية لكل رمز
+            for symbol in list(self.pending_signals.keys()):
+                self.cleanup_expired_signals(symbol)
+            
+            # تنظيف تجزئات الإشارات القديمة
+            self._cleanup_old_hashes()
+            
+            # تنظيف error_log القديم
+            if len(self.error_log) > 500:
+                excess = len(self.error_log) - 500
+                for _ in range(excess):
+                    if self.error_log:
+                        self.error_log.popleft()
+            
+            # تنظيف mode_performance القديم
+            current_time = saudi_time.now()
+            for mode_key in list(self.mode_performance.keys()):
+                if mode_key not in self._get_active_modes():
+                    # حذف بيانات الأنماط غير المفعلة
+                    del self.mode_performance[mode_key]
+            
+            final_total = sum(
+                len(self.pending_signals[symbol][gt]) 
+                for symbol in self.pending_signals 
+                for gt in self.pending_signals[symbol] 
+                if gt not in ['created_at', 'updated_at']
+            )
+            
+            cleaned = initial_total - final_total
+            
+            logger.info(f"🧹 تنظيف الذاكرة: تم تنظيف {cleaned} إشارة - التوقيت السعودي 🇸🇦")
+            
+            return {
+                'initial_count': initial_total,
+                'final_count': final_total,
+                'cleaned': cleaned,
+                'timestamp': current_time.isoformat(),
+                'timezone': 'Asia/Riyadh 🇸🇦'
+            }
+            
+        except Exception as e:
+            self._handle_error("💥 خطأ في تنظيف الذاكرة", e)
+            return {'error': str(e)}

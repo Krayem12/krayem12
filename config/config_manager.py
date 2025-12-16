@@ -4,6 +4,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
+import json
 
 from .validators import ConfigValidator
 
@@ -75,20 +76,6 @@ class ConfigManager:
             
             # 🎯 إعدادات منع التكرار
             'DUPLICATE_SIGNAL_BLOCK_TIME', 'DUPLICATE_CLEANUP_INTERVAL',
-            
-            # 🎯 NEW: Signal lists for all groups
-            'TREND_SIGNALS', 'TREND_CONFIRM_SIGNALS',
-            'ENTRY_SIGNALS_BULLISH', 'ENTRY_SIGNALS_BEARISH',
-            'ENTRY_SIGNALS_BULLISH1', 'ENTRY_SIGNALS_BEARISH1',
-            'ENTRY_SIGNALS_GROUP3_BULLISH', 'ENTRY_SIGNALS_GROUP3_BEARISH',
-            'ENTRY_SIGNALS_GROUP4_BULLISH', 'ENTRY_SIGNALS_GROUP4_BEARISH', 
-            'ENTRY_SIGNALS_GROUP5_BULLISH', 'ENTRY_SIGNALS_GROUP5_BEARISH',
-            'EXIT_SIGNALS', 'GENERAL_SIGNALS',
-            
-            # 🎯 NEW: Keywords for all groups
-            'BULLISH_KEYWORDS', 'BEARISH_KEYWORDS', 'TREND_KEYWORDS',
-            'TREND_CONFIRM_KEYWORDS', 'EXIT_KEYWORDS',
-            'GROUP3_KEYWORDS', 'GROUP4_KEYWORDS', 'GROUP5_KEYWORDS'
         ]
         
         missing_vars = []
@@ -99,29 +86,46 @@ class ConfigManager:
         if missing_vars:
             raise ValueError(f"❌ متغيرات بيئية مطلوبة مفقودة: {', '.join(missing_vars)}")
 
-    def _get_env_str(self, key: str) -> str:
-        """قراءة قيمة نصية من البيئة بدون افتراضيات"""
+    def _get_env_str(self, key: str, default: str = None) -> str:
+        """قراءة قيمة نصية من البيئة"""
         value = os.getenv(key)
         if value is None:
+            if default is not None:
+                return default
             raise ValueError(f"❌ المتغير البيئي المطلوب '{key}' غير موجود")
         return value.strip()
 
-    def _get_env_int(self, key: str) -> int:
-        """قراءة قيمة رقمية من البيئة بدون افتراضيات"""
+    def _get_env_int(self, key: str, default: int = None) -> int:
+        """قراءة قيمة رقمية من البيئة"""
         value = os.getenv(key)
         if value is None:
+            if default is not None:
+                return default
             raise ValueError(f"❌ المتغير البيئي المطلوب '{key}' غير موجود")
         try:
             return int(value.strip())
         except (ValueError, TypeError) as e:
+            if default is not None:
+                return default
             raise ValueError(f"❌ قيمة غير صالحة للمتغير '{key}': {value}") from e
 
-    def _get_env_bool(self, key: str) -> bool:
-        """قراءة قيمة منطقية من البيئة بدون افتراضيات"""
+    def _get_env_bool(self, key: str, default: bool = None) -> bool:
+        """قراءة قيمة منطقية من البيئة"""
         value = os.getenv(key)
         if value is None:
+            if default is not None:
+                return default
             raise ValueError(f"❌ المتغير البيئي المطلوب '{key}' غير موجود")
-        return value.strip().lower() == 'true'
+        
+        value_str = value.strip().lower()
+        if value_str in ['true', '1', 'yes', 'y', 'on']:
+            return True
+        elif value_str in ['false', '0', 'no', 'n', 'off']:
+            return False
+        else:
+            if default is not None:
+                return default
+            raise ValueError(f"❌ قيمة غير صالحة للمتغير '{key}': {value}")
 
     def setup_config(self) -> None:
         """🎯 الإعداد النهائي للتكوين بدون قيم افتراضية - محدث للتجميعات"""
@@ -202,18 +206,28 @@ class ConfigManager:
                 'DUPLICATE_CLEANUP_INTERVAL': self._get_env_int('DUPLICATE_CLEANUP_INTERVAL'),
             }
 
-            self.port = self._get_env_int('PORT')
-            self.config['PORT'] = self.port
+            self.port = self.config['PORT']
             
             self._apply_logging_config_enhanced()
             self._validate_trading_modes_strict()
 
-            # 🎯 تحميل الإشارات مع التخزين المؤقت
+            # 🔧 FIXED: تحميل الإشارات بعد تكوين التطبيق وفحصها
             logger.info("📥 جاري تحميل الإشارات...")
-            self.signals = self._load_all_signals()
+            self.signals = self._load_all_signals_enhanced()
+            
+            # 🔧 FIXED: التحقق من أن الإشارات محملة بشكل صحيح
+            if not self.signals or len(self.signals) == 0:
+                raise ValueError("❌ فشل تحميل أي إشارات من ملف .env")
+            
+            # حساب إجمالي الإشارات
+            total_signals = sum(len(signal_list) for signal_list in self.signals.values() if signal_list)
+            if total_signals == 0:
+                raise ValueError("❌ لا توجد إشارات محددة في ملف .env")
+            
             self.config['signals'] = self.signals
+            logger.info(f"✅ تم تحميل {total_signals} إشارة من {len(self.signals)} فئة")
 
-            self.setup_keywords()
+            self.setup_keywords_enhanced()
             self.validate_configuration()
             
             logger.info("✅ تم تحميل إعدادات النظام بنجاح بدون قيم افتراضية")
@@ -222,10 +236,75 @@ class ConfigManager:
             self._handle_error("❌ فشل إعداد التكوين", e)
             raise
 
+    def _load_all_signals_enhanced(self) -> Dict[str, List[str]]:
+        """🎯 تحميل جميع الإشارات مع فحص وتحسين"""
+        try:
+            signal_categories = {
+                'trend': 'TREND_SIGNALS',
+                'trend_confirm': 'TREND_CONFIRM_SIGNALS',
+                'entry_bullish': 'ENTRY_SIGNALS_BULLISH',
+                'entry_bearish': 'ENTRY_SIGNALS_BEARISH',
+                'exit': 'EXIT_SIGNALS',
+                'general': 'GENERAL_SIGNALS',
+                'entry_bullish1': 'ENTRY_SIGNALS_BULLISH1',
+                'entry_bearish1': 'ENTRY_SIGNALS_BEARISH1',
+                'group3_bullish': 'ENTRY_SIGNALS_GROUP3_BULLISH',
+                'group3_bearish': 'ENTRY_SIGNALS_GROUP3_BEARISH',
+                'group4_bullish': 'ENTRY_SIGNALS_GROUP4_BULLISH',
+                'group4_bearish': 'ENTRY_SIGNALS_GROUP4_BEARISH',
+                'group5_bullish': 'ENTRY_SIGNALS_GROUP5_BULLISH',
+                'group5_bearish': 'ENTRY_SIGNALS_GROUP5_BEARISH'
+            }
+            
+            loaded_signals = {}
+            total_loaded = 0
+            
+            for category, env_key in signal_categories.items():
+                try:
+                    signals = self._load_signal_list_enhanced(env_key)
+                    loaded_signals[category] = signals
+                    total_loaded += len(signals)
+                    
+                    if len(signals) > 0:
+                        logger.debug(f"   ✅ تم تحميل {len(signals)} إشارة من {env_key}")
+                    else:
+                        logger.debug(f"   ⚠️ لا توجد إشارات في {env_key}")
+                        
+                except Exception as e:
+                    self._handle_error(f"❌ خطأ في تحميل {env_key}", e)
+                    loaded_signals[category] = []  # تعيين قائمة فارغة بدلاً من التوقف
+            
+            logger.info(f"📊 إجمالي الإشارات المحملة: {total_loaded} إشارة")
+            return loaded_signals
+            
+        except Exception as e:
+            self._handle_error("❌ خطأ في تحميل جميع الإشارات", e)
+            # 🔧 FIXED: إرجاع قاموس فارغ بدلاً من رفع استثناء
+            return {cat: [] for cat in signal_categories.keys()}
+
+    def _load_signal_list_enhanced(self, env_key: str) -> List[str]:
+        """تحميل قائمة الإشارات من البيئة مع فحص وتحسين"""
+        try:
+            signal_str = self._get_env_str(env_key, "")
+            if not signal_str:
+                logger.warning(f"⚠️ القيمة فارغة لـ {env_key}")
+                return []
+            
+            signals = []
+            for s in signal_str.split(','):
+                s_clean = s.strip()
+                if s_clean:
+                    signals.append(s_clean)
+            
+            return signals
+        except Exception as e:
+            self._handle_error(f"❌ خطأ في تحميل {env_key}", e)
+            return []
+
     def _apply_logging_config_enhanced(self) -> None:
         """🎯 تطبيق إعدادات التسجيل المحسنة مع إصلاح ظهور السجلات"""
         try:
-            log_level = self.config['LOG_LEVEL']
+            log_level = self.config['LOG_LEVEL'].upper()
             debug_mode = self.config['DEBUG']
             
             print(f"🔧 تطبيق إعدادات التسجيل: DEBUG={debug_mode}, LOG_LEVEL={log_level}")
@@ -237,13 +316,13 @@ class ConfigManager:
                 'INFO': logging.INFO,
                 'DEBUG': logging.DEBUG
             }
-            level = level_mapping.get(log_level.upper(), logging.DEBUG)
+            level = level_mapping.get(log_level, logging.INFO)
             
-            # 🛠️ الإصلاح: إعادة تهيئة نظام التسجيل بشكل كامل
+            # 🔧 FIXED: إعادة تهيئة نظام التسجيل بشكل كامل
             for handler in logging.root.handlers[:]:
                 logging.root.removeHandler(handler)
             
-            # 🛠️ الإصلاح: إنشاء معالج كونسول جديد
+            # إنشاء معالج كونسول جديد
             console_handler = logging.StreamHandler()
             console_handler.setLevel(level)
             
@@ -291,12 +370,7 @@ class ConfigManager:
                     logger_instance.removeHandler(handler)
                 # إضافة المعالج الجديد
                 logger_instance.addHandler(console_handler)
-                logger_instance.propagate = False  # 🛠️ منع التكرار
-            
-            # 🛠️ الإصلاح النهائي: معالجة مشكلة urllib3 بشكل خاص
-            urllib3_logger = logging.getLogger('urllib3.connectionpool')
-            urllib3_logger.setLevel(logging.INFO)
-            urllib3_logger.propagate = True
+                logger_instance.propagate = False
             
             # 🛠️ معالجة جميع لوغرات urllib3 ذات الصلة
             urllib3_related_loggers = [
@@ -308,7 +382,7 @@ class ConfigManager:
             
             for urllib_logger in urllib3_related_loggers:
                 logger_instance = logging.getLogger(urllib_logger)
-                logger_instance.setLevel(logging.INFO)
+                logger_instance.setLevel(logging.WARNING)
                 for handler in logger_instance.handlers[:]:
                     logger_instance.removeHandler(handler)
             
@@ -397,61 +471,37 @@ class ConfigManager:
                     if not self.config.get(enabled_key, False):
                         logger.warning(f"⚠️ المجموعة {group} مستخدمة في {mode} ولكنها معطلة")
 
-    @lru_cache(maxsize=1)
-    def _load_all_signals(self) -> Dict[str, List[str]]:
-        """🎯 تحميل جميع الإشارات مع التخزين المؤقت"""
-        return {
-            'trend': self._load_signal_list('TREND_SIGNALS'),
-            'trend_confirm': self._load_signal_list('TREND_CONFIRM_SIGNALS'),
-            'entry_bullish': self._load_signal_list('ENTRY_SIGNALS_BULLISH'),
-            'entry_bearish': self._load_signal_list('ENTRY_SIGNALS_BEARISH'),
-            'exit': self._load_signal_list('EXIT_SIGNALS'),
-            'general': self._load_signal_list('GENERAL_SIGNALS'),
-            'entry_bullish1': self._load_signal_list('ENTRY_SIGNALS_BULLISH1'),
-            'entry_bearish1': self._load_signal_list('ENTRY_SIGNALS_BEARISH1'),
-            'group3_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BULLISH'),
-            'group3_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP3_BEARISH'),
-            'group4_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP4_BULLISH'),
-            'group4_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP4_BEARISH'),
-            'group5_bullish': self._load_signal_list('ENTRY_SIGNALS_GROUP5_BULLISH'),
-            'group5_bearish': self._load_signal_list('ENTRY_SIGNALS_GROUP5_BEARISH')
-        }
-
-    def _load_signal_list(self, env_key: str) -> List[str]:
-        """تحميل قائمة الإشارات من البيئة بدون افتراضيات"""
+    def setup_keywords_enhanced(self) -> None:
+        """إعداد الكلمات المفتاحية مع تحسينات"""
         try:
-            signal_str = self._get_env_str(env_key)
-            signals = [s.strip() for s in signal_str.split(',') if s.strip()]
-            logger.info(f"   ✅ تم تحميل {len(signals)} إشارة من {env_key}")
-            return signals
-        except Exception as e:
-            self._handle_error(f"   ❌ خطأ في تحميل {env_key}", e)
-            return []
-
-    def setup_keywords(self) -> None:
-        """إعداد الكلمات المفتاحية"""
-        try:
-            bullish_kw = self._get_env_str('BULLISH_KEYWORDS')
-            bearish_kw = self._get_env_str('BEARISH_KEYWORDS')
-            trend_kw = self._get_env_str('TREND_KEYWORDS')
-            trend_confirm_kw = self._get_env_str('TREND_CONFIRM_KEYWORDS')
-            exit_kw = self._get_env_str('EXIT_KEYWORDS')
-            group3_kw = self._get_env_str('GROUP3_KEYWORDS')
-            group4_kw = self._get_env_str('GROUP4_KEYWORDS')
-            group5_kw = self._get_env_str('GROUP5_KEYWORDS')
-
-            self.keywords = {
-                'bullish': [kw.strip() for kw in bullish_kw.split(',') if kw.strip()],
-                'bearish': [kw.strip() for kw in bearish_kw.split(',') if kw.strip()],
-                'trend': [kw.strip() for kw in trend_kw.split(',') if kw.strip()],
-                'trend_confirm': [kw.strip() for kw in trend_confirm_kw.split(',') if kw.strip()],
-                'exit': [kw.strip() for kw in exit_kw.split(',') if kw.strip()],
-                'group3': [kw.strip() for kw in group3_kw.split(',') if kw.strip()],
-                'group4': [kw.strip() for kw in group4_kw.split(',') if kw.strip()],
-                'group5': [kw.strip() for kw in group5_kw.split(',') if kw.strip()]
+            keyword_categories = {
+                'bullish': 'BULLISH_KEYWORDS',
+                'bearish': 'BEARISH_KEYWORDS',
+                'trend': 'TREND_KEYWORDS',
+                'trend_confirm': 'TREND_CONFIRM_KEYWORDS',
+                'exit': 'EXIT_KEYWORDS',
+                'group3': 'GROUP3_KEYWORDS',
+                'group4': 'GROUP4_KEYWORDS',
+                'group5': 'GROUP5_KEYWORDS'
             }
             
-            logging.info("🚨 ملاحظة: نظام الكلمات المفتاحية غير مفعل - التطابق التام فقط")
+            self.keywords = {}
+            for category, env_key in keyword_categories.items():
+                try:
+                    kw_str = self._get_env_str(env_key, "")
+                    if kw_str:
+                        keywords = [kw.strip() for kw in kw_str.split(',') if kw.strip()]
+                        self.keywords[category] = keywords
+                        logger.debug(f"   ✅ تم تحميل {len(keywords)} كلمة مفتاحية لـ {category}")
+                    else:
+                        self.keywords[category] = []
+                        logger.warning(f"⚠️ لا توجد كلمات مفتاحية لـ {env_key}")
+                except Exception as e:
+                    self._handle_error(f"❌ خطأ في تحميل الكلمات المفتاحية لـ {env_key}", e)
+                    self.keywords[category] = []
+            
+            logger.info(f"✅ تم تحميل {len(self.keywords)} فئات من الكلمات المفتاحية")
+            
         except Exception as e:
             self._handle_error("❌ خطأ في تحميل الكلمات المفتاحية", e)
             self.keywords = {}
@@ -571,3 +621,47 @@ class ConfigManager:
     def clear_error_log(self) -> None:
         """مسح سجل الأخطاء"""
         self._error_log.clear()
+
+    def get_system_info(self) -> Dict:
+        """الحصول على معلومات النظام"""
+        total_signals = sum(len(signal_list) for signal_list in self.signals.values() if signal_list)
+        
+        return {
+            'port': self.port,
+            'debug': self.config['DEBUG'],
+            'log_level': self.config['LOG_LEVEL'],
+            'telegram_enabled': self.config['TELEGRAM_ENABLED'],
+            'external_server_enabled': self.config['EXTERNAL_SERVER_ENABLED'],
+            'trading_mode': self.config['TRADING_MODE'],
+            'total_signals': total_signals,
+            'signal_categories': len(self.signals),
+            'keywords_categories': len(self.keywords),
+            'error_count': len(self._error_log)
+        }
+
+    def reload_config(self) -> bool:
+        """إعادة تحميل الإعدادات"""
+        try:
+            logger.info("🔄 إعادة تحميل الإعدادات...")
+            
+            # حفظ الإعدادات القديمة
+            old_config = self.config.copy()
+            old_signals = self.signals.copy()
+            
+            # إعادة التهيئة
+            self.config = {}
+            self.signals = {}
+            self.keywords = {}
+            self._error_log = []
+            
+            self.setup_config()
+            
+            logger.info("✅ تم إعادة تحميل الإعدادات بنجاح")
+            return True
+            
+        except Exception as e:
+            # استعادة الإعدادات القديمة في حالة الفشل
+            self.config = old_config
+            self.signals = old_signals
+            self._handle_error("❌ فشل إعادة تحميل الإعدادات", e)
+            return False
