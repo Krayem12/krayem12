@@ -266,6 +266,13 @@ class TradeManager:
                 self.current_trend[symbol] = new_trend
                 self.last_reported_trend[symbol] = new_trend
 
+
+                # ✅ FIX: عند تغيّر الاتجاه فعلياً، أغلق الصفقات المفتوحة للرمز لبدء دورة جديدة
+                if trend_changed:
+                    try:
+                        self.handle_exit_signal(symbol, "TREND_CHANGE")
+                    except Exception as e:
+                        self._handle_error(f"⚠️ خطأ في إغلاق الصفقات عند تغيّر الاتجاه لـ {symbol}", e)
                 # حفظ الاتجاه بشكل دائم في Redis
                 if self.redis_enabled:
                     try:

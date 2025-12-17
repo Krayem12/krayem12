@@ -448,10 +448,6 @@ class GroupManager:
                 trade_result = self._evaluate_single_mode(mode_key, symbol, direction, signal_counts)
                 if trade_result:
                     trade_results.append(trade_result)
-            
-            if trade_results:
-                self._reset_used_signals_after_trade(symbol, direction, trade_results)
-            
             return trade_results
             
         except Exception as e:
