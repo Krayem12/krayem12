@@ -115,6 +115,45 @@ class GroupManager:
         logger.info(f"🎯 بدء توجيه الإشارة: {symbol} -> {classification} -> {signal_data.get('signal_type')} - التوقيت السعودي 🇸🇦")
         
         if not self._validate_input(symbol, signal_data, classification):
+
+        # ======================================================
+        # 🔴 FORCE EXIT: تصفير الصفقات فعليًا عند إشارات الخروج
+        # ======================================================
+        signal_type = signal_data.get("signal_type", "").lower().strip()
+
+        exit_signals = [
+            s.strip().lower()
+            for s in self.config.get("EXIT_SIGNALS", "").split(",")
+            if s.strip()
+        ]
+
+        exit_keywords = [
+            k.strip().lower()
+            for k in self.config.get("EXIT_KEYWORDS", "").split(",")
+            if k.strip()
+        ]
+
+        is_exit_signal = (
+            signal_type in exit_signals
+            or any(k in signal_type for k in exit_keywords)
+        )
+
+        if is_exit_signal:
+            logger.warning(
+                f"🚪 EXIT SIGNAL DETECTED | {symbol} | {signal_type} → تصفير الصفقات فعليًا"
+            )
+
+            closed = self.trade_manager.handle_exit_signal(
+                symbol,
+                signal_type.upper()
+            )
+
+            logger.warning(
+                f"🧹 EXIT RESET DONE | {symbol} | closed_trades={closed}"
+            )
+
+            return []
+
             return []
 
         try:
