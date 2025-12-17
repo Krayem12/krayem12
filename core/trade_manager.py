@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta  # ✅ FIX: إضافة timedelta (كان مستخدمًا بدون استيراد)
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import threading
 from collections import defaultdict, deque
@@ -31,6 +31,10 @@ except ImportError:
         logging.warning("⚠️ استخدام SaudiTime البديل بسبب مشكلة الاستيراد")
 
 logger = logging.getLogger(__name__)
+
+# ✅ ألوان ANSI للّوق (Render غالبًا يدعمها)
+RED = "\033[91m"
+RESET = "\033[0m"
 
 try:
     from utils.redis_helper import RedisManager
@@ -273,14 +277,15 @@ class TradeManager:
                     except Exception as e:
                         self._handle_error(f"⚠️ خطأ في إغلاق الصفقات عند تغيّر الاتجاه لـ {symbol}", e)
 
-                # حفظ الاتجاه بشكل دائم في Redis + ✅ LOG واضح
+                # حفظ الاتجاه بشكل دائم في Redis + ✅ LOG واضح (الاتجاه باللون الأحمر)
                 if self.redis_enabled:
                     try:
                         self.redis.set_trend(symbol, new_trend)
 
-                        # ✅ المطلوب: Log واضح عند الحفظ
                         logger.info(
-                            f"💾 تم حفظ الاتجاه في Redis | Symbol={symbol} | Trend={new_trend.upper()} | Time={saudi_time.now().isoformat()} 🇸🇦"
+                            f"💾 تم حفظ الاتجاه في Redis | Symbol={symbol} | "
+                            f"Trend={RED}{new_trend.upper()}{RESET} | "
+                            f"Time={saudi_time.now().isoformat()} 🇸🇦"
                         )
 
                     except Exception as e:
@@ -501,12 +506,14 @@ class TradeManager:
             self.last_reported_trend[symbol] = new_trend
             self._reset_trend_pool(symbol)
 
-            # حفظ الاتجاه القسري في Redis + ✅ LOG واضح
+            # حفظ الاتجاه القسري في Redis + ✅ LOG واضح (الاتجاه باللون الأحمر)
             if self.redis_enabled:
                 try:
                     self.redis.set_trend(symbol, new_trend)
                     logger.info(
-                        f"💾 تم حفظ الاتجاه في Redis | Symbol={symbol} | Trend={new_trend.upper()} | (FORCED) | Time={saudi_time.now().isoformat()} 🇸🇦"
+                        f"💾 تم حفظ الاتجاه في Redis | Symbol={symbol} | "
+                        f"Trend={RED}{new_trend.upper()}{RESET} | (FORCED) | "
+                        f"Time={saudi_time.now().isoformat()} 🇸🇦"
                     )
                 except Exception as e:
                     self._handle_error(f"⚠️ خطأ في حفظ الاتجاه القسري في Redis لـ {symbol}", e)
@@ -561,16 +568,33 @@ class TradeManager:
         """تحميل الاتجاهات المحفوظة من Redis عند بدء التشغيل"""
         try:
             if not self.redis_enabled:
+                logger.info("ℹ️ Redis غير مفعل – لن يتم تحميل الاتجاهات")
                 return
+
             trends = self.redis.get_all_trends()
             if not trends:
-                logger.info("ℹ️ لا توجد اتجاهات محفوظة مسبقاً في Redis")
+                logger.info("ℹ️ لا توجد اتجاهات محفوظة مسبقاً في Redis عند بدء التشغيل")
                 return
+
+            loaded_count = 0
             for symbol, trend in trends.items():
                 self.current_trend[symbol] = trend
-            logger.info(f"✅ تم تحميل {len(trends)} اتجاه(ات) من Redis عند بدء التشغيل")
+                loaded_count += 1
+
+                # ✅ LOG واضح لكل رمز (الاتجاه باللون الأحمر)
+                logger.info(
+                    f"🔁 REDIS LOAD | تم تحميل الاتجاه من Redis | "
+                    f"Symbol={symbol} | Trend={RED}{str(trend).upper()}{RESET} | "
+                    f"Startup={saudi_time.now().isoformat()} 🇸🇦"
+                )
+
+            # ✅ LOG إجمالي
+            logger.info(
+                f"✅ REDIS LOAD COMPLETE | تم تحميل {loaded_count} اتجاه(ات) من Redis عند بدء التشغيل 🇸🇦"
+            )
+
         except Exception as e:
-            self._handle_error("⚠️ خطأ في تحميل الاتجاهات من Redis", e)
+            self._handle_error("⚠️ خطأ في تحميل الاتجاهات من Redis عند بدء التشغيل", e)
 
     def get_current_trend(self, symbol: str) -> str:
         """الحصول على الاتجاه الحالي مع استخدام Redis كمصدر دائم"""
