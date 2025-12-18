@@ -5,6 +5,8 @@ import time
 import logging
 import os
 import json
+import pytz
+
 from flask import Flask, render_template, jsonify
 from datetime import datetime
 from typing import Dict, Optional
@@ -19,6 +21,7 @@ from maintenance.cleanup_manager import CleanupManager
 
 logger = logging.getLogger(__name__)
 
+
 class TradingSystem:
     """🎯 Trading System with DETAILED TREND CHANGE NOTIFICATIONS"""
 
@@ -27,7 +30,7 @@ class TradingSystem:
         try:
             self.setup_managers()
             self.setup_flask()
-            self.setup_trend_routes()   # ✅ Web trends routes
+            self.setup_trend_routes()
             self.setup_scheduler()
             self.display_system_info()
             logger.info("✅ System initialized successfully with detailed trend notifications")
@@ -81,43 +84,36 @@ class TradingSystem:
         logger.info("🔧 جاري تهيئة تطبيق Flask...")
 
         templates_path = os.path.join(os.path.dirname(__file__), "..", "templates")
+        self.app = Flask(__name__, template_folder=templates_path)
 
-        self.app = Flask(
-            __name__,
-            template_folder=templates_path
-        )
-
-        @self.app.route('/')
+        @self.app.route("/")
         def home():
             return {
                 "status": "running",
                 "system": "Trading System",
-                "version": "11.0_detailed_trend_with_group4_group5",
+                "version": "11.1_saudi_time",
                 "timestamp": datetime.now().isoformat()
             }
 
         self.webhook_handler.register_routes(self.app)
 
-        @self.app.route('/status')
+        @self.app.route("/status")
         def status():
             return self.get_system_status()
 
-        @self.app.route('/signal_stats/<symbol>')
-        def signal_stats(symbol):
-            return self.get_signal_statistics(symbol)
-
-        @self.app.route('/health')
+        @self.app.route("/health")
         def health():
             return {
                 "status": "healthy",
                 "timestamp": datetime.now().isoformat()
             }
 
-        logger.info("✅ تم تهيئة تطبيق Flask والمسارات")
+        logger.info("✅ تم تهيئة Flask بنجاح")
 
-    # ✅✅ التعديل الحقيقي هنا فقط
+    # ============================================================
+    # 📊 Trends Web + API (Redis → Saudi Time)
+    # ============================================================
     def setup_trend_routes(self):
-        """📊 Web + API trends from Redis"""
 
         @self.app.route("/api/trends", methods=["GET"])
         def api_trends():
@@ -127,22 +123,38 @@ class TradingSystem:
             if not redis_client:
                 return jsonify(trends)
 
+            riyadh_tz = pytz.timezone("Asia/Riyadh")
+
             try:
                 symbols = redis_client.smembers("trend:symbols")
 
                 for sym in symbols:
                     symbol = sym.decode() if isinstance(sym, (bytes, bytearray)) else str(sym)
-                    value = redis_client.get(f"trend:{symbol}")
 
-                    if not value:
+                    trend_val = redis_client.get(f"trend:{symbol}")
+                    updated_raw = redis_client.get(f"trend:{symbol}:updated_at")
+
+                    if not trend_val:
                         continue
 
-                    trend_value = value.decode() if isinstance(value, (bytes, bytearray)) else str(value)
+                    updated_at_sa = "—"
+                    if updated_raw:
+                        try:
+                            dt = datetime.fromisoformat(
+                                updated_raw.decode() if isinstance(updated_raw, (bytes, bytearray)) else str(updated_raw)
+                            )
+                            if dt.tzinfo is None:
+                                dt = pytz.utc.localize(dt)
+
+                            dt_sa = dt.astimezone(riyadh_tz)
+                            updated_at_sa = dt_sa.strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            updated_at_sa = "—"
 
                     trends.append({
                         "symbol": symbol,
-                        "trend": trend_value,
-                        "updated_at": None
+                        "trend": trend_val.decode() if isinstance(trend_val, (bytes, bytearray)) else str(trend_val),
+                        "updated_at": updated_at_sa
                     })
 
             except Exception as e:
@@ -154,39 +166,27 @@ class TradingSystem:
         def trends_page():
             return render_template("trends.html")
 
-        logger.info("📊 Trends page enabled (/trends)")
+        logger.info("📊 Trends page enabled with Saudi Time")
+
+    # ============================================================
 
     def setup_scheduler(self):
         self.cleanup_manager.setup_scheduler()
 
     def display_system_info(self):
         self.config_manager.display_config()
-        self.display_loaded_signals()
-
-    def display_loaded_signals(self):
-        logger.info("📊 Loaded Signals Summary:")
-        for category, signals in self.signals.items():
-            logger.info(f"   {category}: {len(signals) if signals else 0}")
 
     def get_system_status(self):
         return {
             "status": "active",
             "timestamp": datetime.now().isoformat(),
-            "port": self.port
+            "port": self.port,
+            "trading_mode": self.config.get("TRADING_MODE")
         }
 
-    def get_signal_statistics(self, symbol: str):
-        try:
-            stats = self.group_manager.get_group_stats(symbol)
-            return {
-                "symbol": symbol,
-                "statistics": stats
-            }
-        except Exception as e:
-            return {"error": str(e)}
-
     def run(self):
-        logger.info(f"🚀 Running on port {self.port}")
+        logger.info(f"🚀 تشغيل النظام على المنفذ {self.port}")
+
         self.app.run(
             host="0.0.0.0",
             port=self.port,
