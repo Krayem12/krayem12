@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <title>لوحة اتجاهات الأسهم</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #0b0b0b;
+            color: #ffffff;
+        }
+
+        header {
+            background: linear-gradient(90deg, #111, #1a1a1a);
+            padding: 20px;
+            text-align: center;
+            border-bottom: 2px solid #333;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 22px;
+            color: #f5c542;
+        }
+
+        .container {
+            padding: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #121212;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        thead {
+            background: #1e1e1e;
+        }
+
+        th, td {
+            padding: 14px;
+            text-align: center;
+            border-bottom: 1px solid #222;
+        }
+
+        th {
+            color: #f5c542;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        tr:hover {
+            background: #1a1a1a;
+        }
+
+        .bullish {
+            color: #00ff9c;
+            font-weight: bold;
+        }
+
+        .bearish {
+            color: #ff4d4d;
+            font-weight: bold;
+        }
+
+        .neutral {
+            color: #ffd166;
+            font-weight: bold;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #888;
+        }
+
+        footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+
+        @media (max-width: 600px) {
+            th, td {
+                padding: 10px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>📊 لوحة اتجاهات الأسهم (Live)</h1>
+</header>
+
+<div class="container">
+    <table>
+        <thead>
+            <tr>
+                <th>السهم</th>
+                <th>الاتجاه</th>
+                <th>آخر تحديث</th>
+            </tr>
+        </thead>
+        <tbody id="trendTable">
+            <tr>
+                <td colspan="3" class="loading">⏳ جاري تحميل البيانات...</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<footer>
+    Trading System Dashboard • Render Edition
+</footer>
+
+<script>
+    async function loadTrends() {
+        try {
+            const response = await fetch("/api/trends");
+            const data = await response.json();
+
+            const table = document.getElementById("trendTable");
+            table.innerHTML = "";
+
+            if (!data || data.length === 0) {
+                table.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="loading">لا توجد بيانات اتجاهات حالياً</td>
+                    </tr>`;
+                return;
+            }
+
+            data.forEach(item => {
+                const trendClass = item.trend ? item.trend.toLowerCase() : "neutral";
+                const trendText = item.trend ? item.trend.toUpperCase() : "NEUTRAL";
+
+                table.innerHTML += `
+                    <tr>
+                        <td>${item.symbol}</td>
+                        <td class="${trendClass}">${trendText}</td>
+                        <td>${item.updated_at || "-"}</td>
+                    </tr>
+                `;
+            });
+
+        } catch (error) {
+            document.getElementById("trendTable").innerHTML = `
+                <tr>
+                    <td colspan="3" class="loading">❌ فشل تحميل البيانات</td>
+                </tr>`;
+        }
+    }
+
+    // تحميل أولي
+    loadTrends();
+
+    // تحديث تلقائي كل 10 ثواني
+    setInterval(loadTrends, 10000);
+</script>
+
+</body>
+</html>
