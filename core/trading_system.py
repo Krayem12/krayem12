@@ -120,7 +120,7 @@ class TradingSystem:
         logger.info("✅ تم تهيئة Flask")
 
     # ------------------------------------------------------------------
-    # 🌐 WEB TRENDS SUPPORT
+    # 🌐 WEB TRENDS SUPPORT (FIXED)
     # ------------------------------------------------------------------
     def setup_trend_routes(self):
         """📊 Routes لعرض اتجاهات الأسهم من Redis"""
@@ -129,8 +129,8 @@ class TradingSystem:
         def api_trends():
             trends = []
 
-            # Redis موجود داخل TradeManager
-            redis_client = getattr(self.trade_manager, "redis", None)
+            # ✅ Redis الصحيح من ConfigManager
+            redis_client = self.config_manager.redis
             if not redis_client:
                 return jsonify(trends)
 
@@ -232,4 +232,3 @@ class TradingSystem:
 
     def shutdown(self):
         logger.info("🧹 جاري إغلاق النظام بشكل نظيف...")
-
