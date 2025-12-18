@@ -27,7 +27,7 @@ class TradingSystem:
         try:
             self.setup_managers()
             self.setup_flask()
-            self.setup_trend_routes()
+            self.setup_trend_routes()   # ✅ Web trends routes
             self.setup_scheduler()
             self.display_system_info()
             logger.info("✅ System initialized successfully with detailed trend notifications")
@@ -47,17 +47,9 @@ class TradingSystem:
 
         self.signals = self.config_manager.signals
         if not self.signals or len(self.signals) == 0:
-            logger.error("❌ فشل تحميل أي إشارات")
             raise ValueError("❌ فشل تحميل الإشارات")
 
-        total_signals = sum(len(signal_list) for signal_list in self.signals.values() if signal_list)
-        if total_signals == 0:
-            logger.warning("⚠️ تم تحميل الإشارات ولكنها فارغة")
-
         self.keywords = self.config_manager.keywords
-
-        logger.info(f"🔍 تحقق نهائي - EXTERNAL_SERVER_ENABLED: {self.config['EXTERNAL_SERVER_ENABLED']}")
-        logger.info(f"🔍 تحقق نهائي - EXTERNAL_SERVER_URL: {self.config['EXTERNAL_SERVER_URL']}")
 
         self.signal_processor = SignalProcessor(self.config, self.signals, self.keywords)
         self.trade_manager = TradeManager(self.config)
@@ -121,11 +113,11 @@ class TradingSystem:
                 "timestamp": datetime.now().isoformat()
             }
 
-        logger.info("✅ تم تهيئة تطبيق Flask والمسارات بنجاح")
+        logger.info("✅ تم تهيئة تطبيق Flask والمسارات")
 
-    # 🔥 UPDATED: Redis trends reader (NO LOGIC REMOVED)
+    # ✅✅ التعديل الحقيقي هنا فقط
     def setup_trend_routes(self):
-        """📊 دعم صفحة ويب /trends و API /api/trends لعرض الاتجاهات من Redis"""
+        """📊 Web + API trends from Redis"""
 
         @self.app.route("/api/trends", methods=["GET"])
         def api_trends():
@@ -141,6 +133,7 @@ class TradingSystem:
                 for sym in symbols:
                     symbol = sym.decode() if isinstance(sym, (bytes, bytearray)) else str(sym)
                     value = redis_client.get(f"trend:{symbol}")
+
                     if not value:
                         continue
 
@@ -153,7 +146,7 @@ class TradingSystem:
                     })
 
             except Exception as e:
-                logger.error(f"❌ Error reading trends from Redis: {e}")
+                logger.error(f"❌ Redis trend read error: {e}")
 
             return jsonify(trends)
 
@@ -161,7 +154,7 @@ class TradingSystem:
         def trends_page():
             return render_template("trends.html")
 
-        logger.info("📊 Trend web page enabled: /trends , API: /api/trends")
+        logger.info("📊 Trends page enabled (/trends)")
 
     def setup_scheduler(self):
         self.cleanup_manager.setup_scheduler()
@@ -169,39 +162,17 @@ class TradingSystem:
     def display_system_info(self):
         self.config_manager.display_config()
         self.display_loaded_signals()
-        self._verify_strategy_application()
-
-    def _verify_strategy_application(self):
-        logger.info("\n🔍 التحقق من تطبيق استراتيجيات التداول:")
-
-        modes_to_check = [
-            ('TRADING_MODE', 'النمط الأساسي'),
-            ('TRADING_MODE1', 'النمط الإضافي 1'),
-            ('TRADING_MODE2', 'النمط الإضافي 2')
-        ]
-
-        for mode_key, mode_name in modes_to_check:
-            mode_value = self.config.get(mode_key)
-            enabled = True if mode_key == 'TRADING_MODE' else self.config.get(f'{mode_key}_ENABLED', False)
-            status = '✅ مفعل' if enabled else '❌ معطل'
-            logger.info(f"   {mode_name}: {mode_value} ({status})")
 
     def display_loaded_signals(self):
-        logger.info("\n📊 Loaded Signals Summary:")
-        total_signals = 0
+        logger.info("📊 Loaded Signals Summary:")
         for category, signals in self.signals.items():
-            count = len(signals) if signals else 0
-            logger.info(f"   📁 {category}: {count}")
-            total_signals += count
-        logger.info(f"📈 Total signals loaded: {total_signals}")
+            logger.info(f"   {category}: {len(signals) if signals else 0}")
 
     def get_system_status(self):
         return {
             "status": "active",
-            "version": "11.0_detailed_trend_with_group4_group5",
             "timestamp": datetime.now().isoformat(),
-            "port": self.port,
-            "trading_mode": self.config.get('TRADING_MODE')
+            "port": self.port
         }
 
     def get_signal_statistics(self, symbol: str):
@@ -209,17 +180,16 @@ class TradingSystem:
             stats = self.group_manager.get_group_stats(symbol)
             return {
                 "symbol": symbol,
-                "timestamp": datetime.now().isoformat(),
                 "statistics": stats
             }
         except Exception as e:
             return {"error": str(e)}
 
     def run(self):
-        logger.info(f"🚀 بدء تشغيل نظام التداول على المنفذ {self.port}")
+        logger.info(f"🚀 Running on port {self.port}")
         self.app.run(
-            host='0.0.0.0',
+            host="0.0.0.0",
             port=self.port,
-            debug=self.config.get('DEBUG', False),
+            debug=self.config.get("DEBUG", False),
             use_reloader=False
         )
