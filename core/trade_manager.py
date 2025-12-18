@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import threading
 from collections import defaultdict, deque
 
-# 🛠️ استيراد التوقيت السعودي
+# 🛠️ التوقيت السعودي
 try:
     from utils.time_utils import saudi_time
 except ImportError:
@@ -16,7 +16,7 @@ except ImportError:
 
         class SaudiTime:
             def __init__(self):
-                self.timezone = pytz.timezone('Asia/Riyadh')
+                self.timezone = pytz.timezone("Asia/Riyadh")
 
             def now(self):
                 return datetime.now(self.timezone)
@@ -24,10 +24,10 @@ except ImportError:
             def format_time(self, dt=None):
                 if dt is None:
                     dt = self.now()
-                return dt.strftime('%Y-%m-%d %I:%M:%S %p')
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
 
         saudi_time = SaudiTime()
-        logging.warning("⚠️ استخدام SaudiTime البديل")
+        logging.warning("⚠️ SaudiTime fallback مستخدم")
 
 logger = logging.getLogger(__name__)
 
@@ -46,26 +46,27 @@ except ImportError:
 
 class TradeManager:
     """
-    🎯 TradeManager – Enhanced Trend System
-    📌 يدعم:
-    - اتجاهات ثابتة
-    - تخزين Redis
-    - وقت تحديث حقيقي بالتوقيت السعودي 🇸🇦
+    🎯 TradeManager – FINAL STABLE VERSION
+    - Trend handling
+    - Redis persistence
+    - Saudi Time
     """
 
     def __init__(self, config):
         self.config = config
         self.trade_lock = threading.RLock()
 
+        # Trades
         self.active_trades = {}
         self.symbol_trade_count = defaultdict(int)
         self.total_trade_counter = 0
         self.metrics = {"trades_opened": 0, "trades_closed": 0}
 
+        # Trend state
         self.current_trend = {}
         self.previous_trend = {}
         self.last_reported_trend = {}
-        self.trend_strength = {}
+        self.trend_strength = defaultdict(int)
         self.trend_signals_count = defaultdict(int)
         self.trend_history = defaultdict(lambda: deque(maxlen=50))
         self.trend_pool = {}
@@ -74,6 +75,7 @@ class TradeManager:
         self.notification_manager = None
         self._error_log = deque(maxlen=500)
 
+        # Redis
         self.redis = None
         self.redis_enabled = False
         try:
@@ -86,24 +88,49 @@ class TradeManager:
         if self.redis_enabled:
             self._load_trends_from_redis()
 
-        logger.info("🎯 TradeManager جاهز – Redis + Saudi Time 🇸🇦")
+        logger.info("✅ TradeManager FINAL جاهز – Redis + Saudi Time 🇸🇦")
 
+    # ======================================================
+    # 🔗 ربط المدراء
+    # ======================================================
     def set_group_manager(self, gm):
         self.group_manager = gm
 
     def set_notification_manager(self, nm):
         self.notification_manager = nm
 
-    # =========================================================
-    # 🔥 تحديث الاتجاه + حفظ وقت التحديث الحقيقي
-    # =========================================================
+    # ======================================================
+    # 🔎 الاتجاه الحالي (مطلوب للـ webhook_handler)
+    # ======================================================
+    def get_current_trend(self, symbol: str) -> str:
+        try:
+            trend = self.current_trend.get(symbol)
+            if trend:
+                return trend
+
+            if self.redis_enabled:
+                saved = self.redis.get(f"trend:{symbol}")
+                if saved:
+                    saved_trend = saved.decode() if isinstance(saved, bytes) else str(saved)
+                    self.current_trend[symbol] = saved_trend
+                    return saved_trend
+
+            return "UNKNOWN"
+
+        except Exception as e:
+            self._handle_error(f"⚠️ خطأ في get_current_trend لـ {symbol}", e)
+            return "UNKNOWN"
+
+    # ======================================================
+    # 📈 تحديث الاتجاه (مع حفظ الوقت الحقيقي)
+    # ======================================================
     def update_trend(self, symbol: str, classification: str, signal_data: Dict):
         try:
             direction = self._determine_trend_direction(classification, signal_data)
             if not direction:
                 return False, "UNKNOWN", []
 
-            old_trend = self.current_trend.get(symbol, "UNKNOWN")
+            old_trend = self.get_current_trend(symbol)
             trend_changed = old_trend != direction
 
             self.current_trend[symbol] = direction
@@ -112,14 +139,12 @@ class TradeManager:
 
             updated_at = saudi_time.now().isoformat()
 
-            # ✅ حفظ الاتجاه + وقت التحديث في Redis
             if self.redis_enabled:
                 self.redis.set(f"trend:{symbol}", direction)
                 self.redis.set(f"trend:{symbol}:updated_at", updated_at)
 
                 logger.info(
-                    f"💾 REDIS | {symbol} → {RED}{direction.upper()}{RESET} | "
-                    f"UpdatedAt={updated_at} 🇸🇦"
+                    f"💾 REDIS | {symbol} → {RED}{direction.upper()}{RESET} | {updated_at} 🇸🇦"
                 )
 
             self.trend_history[symbol].append({
@@ -135,36 +160,26 @@ class TradeManager:
             self._handle_error("💥 خطأ في update_trend", e)
             return False, "UNKNOWN", []
 
-    # =========================================================
-    # 🧠 استخراج الاتجاه
-    # =========================================================
+    # ======================================================
+    # 🧠 تحديد الاتجاه
+    # ======================================================
     def _determine_trend_direction(self, classification: str, signal_data: Dict) -> Optional[str]:
-        st = signal_data.get("signal_type", "").lower()
-        cl = classification.lower()
+        signal_type = signal_data.get("signal_type", "").lower()
+        classification = classification.lower()
 
-        if "bullish" in st or "bullish" in cl:
+        bullish = ["bullish", "buy", "long", "up"]
+        bearish = ["bearish", "sell", "short", "down"]
+
+        if any(k in signal_type or k in classification for k in bullish):
             return "bullish"
-        if "bearish" in st or "bearish" in cl:
+        if any(k in signal_type or k in classification for k in bearish):
             return "bearish"
+
         return None
 
-    # =========================================================
-    # ⏱️ جلب وقت آخر تحديث (لصفحة الويب)
-    # =========================================================
-    def get_trend_updated_at(self, symbol: str) -> Optional[str]:
-        try:
-            if self.redis_enabled:
-                val = self.redis.get(f"trend:{symbol}:updated_at")
-                if val:
-                    return val.decode() if isinstance(val, bytes) else str(val)
-            return None
-        except Exception as e:
-            self._handle_error("⚠️ خطأ في قراءة updated_at", e)
-            return None
-
-    # =========================================================
-    # 🔁 تحميل الاتجاهات عند بدء التشغيل
-    # =========================================================
+    # ======================================================
+    # 🔁 تحميل الاتجاهات من Redis
+    # ======================================================
     def _load_trends_from_redis(self):
         try:
             trends = self.redis.get_all_trends()
@@ -176,9 +191,23 @@ class TradeManager:
         except Exception as e:
             self._handle_error("⚠️ خطأ تحميل الاتجاهات من Redis", e)
 
-    # =========================================================
-    # 🧹 إدارة الأخطاء
-    # =========================================================
+    # ======================================================
+    # ⏱️ وقت آخر تحديث
+    # ======================================================
+    def get_trend_updated_at(self, symbol: str) -> Optional[str]:
+        try:
+            if self.redis_enabled:
+                value = self.redis.get(f"trend:{symbol}:updated_at")
+                if value:
+                    return value.decode() if isinstance(value, bytes) else str(value)
+            return None
+        except Exception as e:
+            self._handle_error("⚠️ خطأ قراءة updated_at", e)
+            return None
+
+    # ======================================================
+    # 🧹 الأخطاء
+    # ======================================================
     def _handle_error(self, msg, exc=None):
         full = f"{msg}: {exc}" if exc else msg
         logger.error(full)
@@ -188,9 +217,9 @@ class TradeManager:
             "error": full
         })
 
-    # =========================================================
-    # 📊 معلومات النظام
-    # =========================================================
+    # ======================================================
+    # 📊 إحصائيات
+    # ======================================================
     def get_system_stats(self) -> Dict:
         return {
             "active_trades": len(self.active_trades),
