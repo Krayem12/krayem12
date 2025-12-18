@@ -371,7 +371,7 @@ class GroupManager:
                 for gt in all_group_types:
                     self.pending_signals[group_key][gt] = deque(maxlen=200)
                 
-                self.pending_signals[group_key]["created_at"] = saudi_time.now()
+                self.pending_signals[group_key]["_meta"] = {"created_at": saudi_time.now(), "updated_at": saudi_time.now()}
             
             signal_info = {
                 'hash': hashlib.md5(
@@ -387,7 +387,7 @@ class GroupManager:
             }
             
             self.pending_signals[group_key][group_type].append(signal_info)
-            self.pending_signals[group_key]["updated_at"] = saudi_time.now()
+            self.pending_signals[group_key].setdefault("_meta", {})["updated_at"] = saudi_time.now()
             
             logger.info(f"📥 إشارة مضافة: {symbol} -> {signal_data['signal_type']} → {group_type} - التوقيت السعودي 🇸🇦")
             
@@ -405,22 +405,23 @@ class GroupManager:
             signal_key = f"{symbol}_{signal_type}_{group_type}"
             current_time = saudi_time.now()
             
-            # 🔍 البحث عن إشارات مكررة حديثة لنفس الرمز ونفس الإشارة ونفس المجموعة
-            for existing_key, timestamp in list(self.signal_hashes.items()):
-                # تنظيف الإشارات القديمة تلقائياً
-                if (current_time - timestamp).total_seconds() > self.duplicate_block_time:
-                    del self.signal_hashes[existing_key]
-                    continue
+            with self.signal_lock:
+                # 🔍 البحث عن إشارات مكررة حديثة لنفس الرمز ونفس الإشارة ونفس المجموعة
+                for existing_key, timestamp in list(self.signal_hashes.items()):
+                    # تنظيف الإشارات القديمة تلقائياً
+                    if (current_time - timestamp).total_seconds() > self.duplicate_block_time:
+                        del self.signal_hashes[existing_key]
+                        continue
                     
-                # 🔥 التعديل: إذا كانت نفس الإشارة لنفس الرمز ونفس المجموعة
-                if existing_key == signal_key:
-                    logger.warning(f"🚫 إشارة مكررة لنفس المجموعة: {symbol} -> {signal_type} -> {group_type}")
-                    return True
+                    # 🔥 التعديل: إذا كانت نفس الإشارة لنفس الرمز ونفس المجموعة
+                    if existing_key == signal_key:
+                        logger.warning(f"🚫 إشارة مكررة لنفس المجموعة: {symbol} -> {signal_type} -> {group_type}")
+                        return True
             
-            # ✅ إضافة الإشارة الجديدة
-            self.signal_hashes[signal_key] = current_time
-            logger.info(f"🔓 السماح بالإشارة: {symbol} -> {signal_type} -> {group_type}")
-            return False
+                # ✅ إضافة الإشارة الجديدة
+                self.signal_hashes[signal_key] = current_time
+                logger.info(f"🔓 السماح بالإشارة: {symbol} -> {signal_type} -> {group_type}")
+                return False
                 
         except Exception as e:
             self._handle_error("💥 خطأ في فحص التكرار", e)
@@ -430,26 +431,27 @@ class GroupManager:
         """🎯 FIXED: تنظيف التجزئات القديمة باستخدام الإعدادات من .env فقط"""
         try:
             current_time = saudi_time.now()
+            with self.signal_lock:
             
-            if (current_time - self.last_hash_cleanup).total_seconds() > self.duplicate_cleanup_interval:
-                initial_count = len(self.signal_hashes)
+                if (current_time - self.last_hash_cleanup).total_seconds() > self.duplicate_cleanup_interval:
+                    initial_count = len(self.signal_hashes)
                 
-                # 🔥 التعديل: استخدام عامل التنظيف من .env بدلاً من القيمة الثابتة
-                max_age = self.duplicate_block_time * self.cleanup_factor
+                    # 🔥 التعديل: استخدام عامل التنظيف من .env بدلاً من القيمة الثابتة
+                    max_age = self.duplicate_block_time * self.cleanup_factor
                 
-                expired_hashes = [
-                    hash_key for hash_key, timestamp in self.signal_hashes.items()
-                    if (current_time - timestamp).total_seconds() > max_age
-                ]
+                    expired_hashes = [
+                        hash_key for hash_key, timestamp in self.signal_hashes.items()
+                        if (current_time - timestamp).total_seconds() > max_age
+                    ]
                 
-                for hash_key in expired_hashes:
-                    del self.signal_hashes[hash_key]
+                    for hash_key in expired_hashes:
+                        del self.signal_hashes[hash_key]
                 
-                cleaned_count = len(expired_hashes)
-                if cleaned_count > 0:
-                    logger.info(f"🧹 تم تنظيف {cleaned_count} تجزئة قديمة من أصل {initial_count} - التوقيت السعودي 🇸🇦")
+                    cleaned_count = len(expired_hashes)
+                    if cleaned_count > 0:
+                        logger.info(f"🧹 تم تنظيف {cleaned_count} تجزئة قديمة من أصل {initial_count} - التوقيت السعودي 🇸🇦")
                 
-                self.last_hash_cleanup = current_time
+                    self.last_hash_cleanup = current_time
                 
         except Exception as e:
             self._handle_error("💥 خطأ في تنظيف التجزئات", e)
@@ -631,16 +633,27 @@ class GroupManager:
                 logger.error("❌ trade_manager غير متوفر للتحقق من إمكانية فتح الصفقة")
                 return False
             
-            current_count = self.trade_manager.get_active_trades_count(symbol)
+            # 🔧 FIXED: دعم نسخ TradeManager المختلفة (قد تختلف أسماء الدوال)
+            get_count = getattr(self.trade_manager, 'get_active_trades_count', None)
+            active_trades = getattr(self.trade_manager, 'active_trades', {}) or {}
+
+            if callable(get_count):
+                current_count = int(get_count(symbol))
+                total_trades = int(get_count())
+            else:
+                # ✅ fallback إذا لم تتوفر الدالة في TradeManager
+                current_count = sum(1 for t in active_trades.values() if t.get('symbol') == symbol)
+                total_trades = len(active_trades)
+
             max_per_symbol = self.config.get('MAX_TRADES_PER_SYMBOL', 20)
             if current_count >= max_per_symbol:
                 logger.warning(f"🚫 وصل الحد الأقصى للصفقات للرمز {symbol}: {current_count}/{max_per_symbol} - التوقيت السعودي 🇸🇦")
                 return False
-            
-            total_trades = self.trade_manager.get_active_trades_count()
+
             max_open_trades = self.config.get('MAX_OPEN_TRADES', 20)
             if total_trades >= max_open_trades:
                 logger.warning(f"🚫 وصل الحد الأقصى الإجمالي للصفقات: {total_trades}/{max_open_trades} - التوقيت السعودي 🇸🇦")
+                return False
                 return False
             
             mode_limits = {
@@ -843,22 +856,23 @@ class GroupManager:
             ttl_minutes = self.signal_ttl_minutes
             expiration_time = saudi_time.now() - timedelta(minutes=ttl_minutes)
 
-            cleaned_count = 0
-            for group_type in list(self.pending_signals[group_key].keys()):
-                if group_type in ['created_at', 'updated_at']:
-                    continue
+            with self.signal_lock:
+                cleaned_count = 0
+                for group_type in list(self.pending_signals[group_key].keys()):
+                    if group_type == "_meta":
+                        continue
                     
-                if group_type in self.pending_signals[group_key]:
-                    original_count = len(self.pending_signals[group_key][group_type])
-                    self.pending_signals[group_key][group_type] = deque(
-                        [signal for signal in self.pending_signals[group_key][group_type]
-                         if signal.get('timestamp', saudi_time.now()) > expiration_time],
-                        maxlen=200
-                    )
-                    cleaned_count += (original_count - len(self.pending_signals[group_key][group_type]))
+                    if group_type in self.pending_signals[group_key]:
+                        original_count = len(self.pending_signals[group_key][group_type])
+                        self.pending_signals[group_key][group_type] = deque(
+                            [signal for signal in self.pending_signals[group_key][group_type]
+                             if signal.get('timestamp', saudi_time.now()) > expiration_time],
+                            maxlen=200
+                        )
+                        cleaned_count += (original_count - len(self.pending_signals[group_key][group_type]))
 
-            if cleaned_count > 0:
-                logger.info(f"🧹 تم تنظيف {cleaned_count} إشارة منتهية لـ {symbol} (TTL: {ttl_minutes} دقيقة) - التوقيت السعودي 🇸🇦")
+                if cleaned_count > 0:
+                    logger.info(f"🧹 تم تنظيف {cleaned_count} إشارة منتهية لـ {symbol} (TTL: {ttl_minutes} دقيقة) - التوقيت السعودي 🇸🇦")
 
         except Exception as e:
             self._handle_error(f"⚠️ خطأ في تنظيف الإشارات المنتهية الصلاحية", e)
@@ -885,8 +899,9 @@ class GroupManager:
                 'group4_bearish': len(groups.get('group4_bearish', [])),
                 'group5_bullish': len(groups.get('group5_bullish', [])),
                 'group5_bearish': len(groups.get('group5_bearish', [])),
-                'total_signals': sum(len(groups[gt]) for gt in groups if gt not in ['created_at', 'updated_at'] and isinstance(groups[gt], deque)),
-                'updated_at': groups.get('updated_at'),
+                'total_signals': sum(len(groups[gt]) for gt in groups if gt != "_meta" and isinstance(groups[gt], deque)),
+                'created_at': groups.get('_meta', {}).get('created_at'),
+                'updated_at': groups.get('_meta', {}).get('updated_at'),
                 'timezone': 'Asia/Riyadh 🇸🇦'
             }
         except Exception as e:
@@ -946,7 +961,7 @@ class GroupManager:
                 len(self.pending_signals[symbol][gt]) 
                 for symbol in self.pending_signals 
                 for gt in self.pending_signals[symbol] 
-                if gt not in ['created_at', 'updated_at']
+                if gt != "_meta"
             )
             
             # تنظيف الإشارات المنتهية لكل رمز
@@ -974,7 +989,7 @@ class GroupManager:
                 len(self.pending_signals[symbol][gt]) 
                 for symbol in self.pending_signals 
                 for gt in self.pending_signals[symbol] 
-                if gt not in ['created_at', 'updated_at']
+                if gt != "_meta"
             )
             
             cleaned = initial_total - final_total
