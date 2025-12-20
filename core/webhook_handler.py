@@ -1,3 +1,4 @@
+
 import json
 import re
 import logging
@@ -487,18 +488,33 @@ class WebhookHandler:
         logger.info(f"📈 معالجة إشارة اتجاه لـ {symbol}: {signal_data['signal_type']} - التوقيت السعودي 🇸🇦")
         
         should_report, old_trend, trend_signals = self.trade_manager.update_trend(symbol, classification, signal_data)
+        current_trend = self.trade_manager.get_current_trend(symbol)
         
         logger.info(f"📊 نتيجة تحديث الاتجاه: {symbol} -> تغيير={should_report}, اتجاه قديم={old_trend}, عدد الإشارات={len(trend_signals)} - التوقيت السعودي 🇸🇦")
+        
+        # 🔧 FIX: معالجة trend_signals التي تأتي كقائمة سلاسل بدلاً من قواميس
+        signals_details = []
+        for signal in trend_signals:
+            if isinstance(signal, dict):
+                signals_details.append({
+                    "signal_type": signal.get('signal_type', 'UNKNOWN'),
+                    "direction": signal.get('direction', current_trend)
+                })
+            else:
+                signals_details.append({
+                    "signal_type": str(signal),
+                    "direction": current_trend
+                })
         
         response_data = {
             "status": "trend_processed", 
             "symbol": symbol, 
             "classification": classification,
             "trend_changed": should_report,
-            "current_trend": self.trade_manager.get_current_trend(symbol),
+            "current_trend": current_trend,
             "old_trend": old_trend or "UNKNOWN",
             "signals_used": len(trend_signals),
-            "signals_details": [{"signal_type": s['signal_type'], "direction": s['direction']} for s in trend_signals],
+            "signals_details": signals_details,
             "timezone": "Asia/Riyadh 🇸🇦"
         }
 
@@ -509,7 +525,7 @@ class WebhookHandler:
             logger.info(f"🔍 تحقق الإشعار - التليجرام: {telegram_enabled}, الخارجي: {external_enabled} - التوقيت السعودي 🇸🇦")
             
             if telegram_enabled or external_enabled:
-                self._send_trend_notification(signal_data, self.trade_manager.get_current_trend(symbol), old_trend, trend_signals)
+                self._send_trend_notification(signal_data, current_trend, old_trend, signals_details)
             else:
                 logger.info("🔕 جميع خدمات الإشعارات معطلة - تم تخطي إرسال إشعار الاتجاه - التوقيت السعودي 🇸🇦")
         

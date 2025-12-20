@@ -1,3 +1,4 @@
+
 # core/trade_manager.py
 # ==========================================================
 # ✅ TradeManager – FINAL & COMPATIBLE VERSION
@@ -138,19 +139,51 @@ class TradeManager:
             logger.error(f"count_trades_by_mode failed: {e}")
             return 0
 
-    def get_active_trades_count(self, symbol: str) -> int:
+    def get_active_trades_count(self, symbol: str = None) -> int:
         """
-        Count all open trades for a symbol.
+        Count all open trades for a symbol, or total trades if no symbol.
         """
         try:
             with self.trade_lock:
-                return sum(
-                    1 for trade in self.active_trades.values()
-                    if trade.get("symbol") == symbol
-                )
+                if symbol:
+                    return sum(
+                        1 for trade in self.active_trades.values()
+                        if trade.get("symbol") == symbol
+                    )
+                else:
+                    # 🔧 FIXED: إرجاع إجمالي عدد الصفقات عندما لا يتم تمرير رمز
+                    return len(self.active_trades)
         except Exception as e:
             logger.error(f"get_active_trades_count failed: {e}")
             return 0
+
+    def open_trade(self, symbol: str, direction: str, strategy_type: str, mode_key: str) -> bool:
+        """فتح صفقة جديدة"""
+        try:
+            trade_id = f"{symbol}_{direction}_{saudi_time.now().strftime('%Y%m%d%H%M%S')}_{hash(strategy_type) % 10000:04d}"
+            
+            with self.trade_lock:
+                trade_info = {
+                    'id': trade_id,
+                    'symbol': symbol,
+                    'direction': direction,
+                    'strategy_type': strategy_type,
+                    'mode': mode_key,
+                    'opened_at': saudi_time.now().isoformat(),
+                    'timezone': 'Asia/Riyadh 🇸🇦'
+                }
+                
+                self.active_trades[trade_id] = trade_info
+                self.symbol_trade_count[symbol] += 1
+                self.total_trade_counter += 1
+                self.metrics["trades_opened"] += 1
+                
+                logger.info(f"✅ تم فتح صفقة: {trade_id} - التوقيت السعودي 🇸🇦")
+                return True
+                
+        except Exception as e:
+            self._handle_error("open_trade", e)
+            return False
 
     def handle_exit_signal(self, symbol: str, reason: str = "") -> int:
         """
