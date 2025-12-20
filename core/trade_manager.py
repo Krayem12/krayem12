@@ -1,4 +1,3 @@
-
 # core/trade_manager.py
 # ==========================================================
 # ✅ TradeManager – FINAL & COMPATIBLE VERSION
