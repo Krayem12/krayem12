@@ -2,461 +2,171 @@
 <html lang="ar">
 <head>
     <meta charset="UTF-8">
-    <title>لوحة اتجاهات الأسهم - التوقيت السعودي</title>
+    <title>لوحة اتجاهات الأسهم</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <style>
         body {
             margin: 0;
-            padding: 20px;
-            font-family: Arial, sans-serif;
-            background: #0f172a;
-            color: white;
+            padding: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #0b0b0b;
+            color: #ffffff;
         }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
+
         header {
-            text-align: center;
-            margin-bottom: 30px;
+            background: linear-gradient(90deg, #111, #1a1a1a);
             padding: 20px;
-            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-            border-radius: 10px;
-            border: 1px solid #475569;
-        }
-        
-        h1 {
-            color: #fbbf24;
-            margin: 0;
-        }
-        
-        .subtitle {
-            color: #94a3b8;
-            margin: 10px 0 0 0;
-            font-size: 14px;
-        }
-        
-        .status-bar {
-            display: flex;
-            justify-content: space-between;
-            background: #1e293b;
-            padding: 10px 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border: 1px solid #475569;
-        }
-        
-        .status-item {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        
-        .status-label {
-            font-size: 12px;
-            color: #94a3b8;
-            margin-bottom: 5px;
-        }
-        
-        .status-value {
-            font-size: 18px;
-            font-weight: bold;
-            color: #fbbf24;
-        }
-        
-        .controls {
-            background: #1e293b;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border: 1px solid #475569;
             text-align: center;
+            border-bottom: 2px solid #333;
         }
-        
-        .refresh-interval {
-            display: inline-block;
-            margin-left: 20px;
-            color: #94a3b8;
-            font-size: 14px;
+
+        header h1 {
+            margin: 0;
+            font-size: 22px;
+            color: #f5c542;
         }
-        
-        .refresh-interval span {
-            color: #fbbf24;
-            font-weight: bold;
+
+        .container {
+            padding: 20px;
         }
-        
+
         table {
             width: 100%;
             border-collapse: collapse;
-            background: #1e293b;
+            background: #121212;
             border-radius: 10px;
             overflow: hidden;
-            border: 1px solid #475569;
         }
-        
+
         thead {
-            background: #334155;
+            background: #1e1e1e;
         }
-        
+
+        th, td {
+            padding: 14px;
+            text-align: center;
+            border-bottom: 1px solid #222;
+        }
+
         th {
-            padding: 15px;
-            text-align: left;
-            color: #fbbf24;
-            font-weight: 600;
-            border-bottom: 2px solid #475569;
+            color: #f5c542;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
-        
-        td {
-            padding: 15px;
-            border-bottom: 1px solid #475569;
-        }
-        
+
         tr:hover {
-            background: #2d3748;
+            background: #1a1a1a;
         }
-        
+
         .bullish {
-            color: #10b981;
+            color: #00ff9c;
             font-weight: bold;
         }
-        
+
         .bearish {
-            color: #ef4444;
+            color: #ff4d4d;
             font-weight: bold;
         }
-        
+
         .neutral {
-            color: #fbbf24;
+            color: #ffd166;
             font-weight: bold;
         }
-        
+
         .loading {
             text-align: center;
-            padding: 40px;
-            color: #94a3b8;
+            padding: 20px;
+            color: #888;
         }
-        
-        .refresh-btn {
-            background: #fbbf24;
-            color: #0f172a;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 0 5px;
-            transition: background 0.3s;
+
+        footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
         }
-        
-        .refresh-btn:hover {
-            background: #f59e0b;
-        }
-        
-        .test-btn {
-            background: #3b82f6;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 0 5px;
-            transition: background 0.3s;
-        }
-        
-        .test-btn:hover {
-            background: #2563eb;
-        }
-        
-        .debug-info {
-            background: #1e293b;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            border: 1px solid #475569;
-            color: #94a3b8;
-            font-size: 14px;
-        }
-        
-        .auto-refresh-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #10b981;
-            margin-right: 5px;
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-        
-        @media (max-width: 768px) {
-            table {
-                display: block;
-                overflow-x: auto;
-            }
-            
-            .status-bar {
-                flex-direction: column;
-                gap: 15px;
-            }
-            
-            .controls {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-            }
-            
-            .refresh-interval {
-                margin: 10px 0 0 0;
+
+        @media (max-width: 600px) {
+            th, td {
+                padding: 10px;
+                font-size: 12px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>📊 لوحة اتجاهات الأسهم - التوقيت السعودي 🇸🇦</h1>
-            <p class="subtitle">عرض مباشر للاتجاهات المخزنة في Redis - التحديث كل 5 دقائق</p>
-        </header>
-        
-        <div class="status-bar">
-            <div class="status-item">
-                <span class="status-label">إجمالي الرموز</span>
-                <span class="status-value" id="totalSymbols">0</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">الاتجاه الصاعد</span>
-                <span class="status-value" id="bullishCount">0</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">الاتجاه الهابط</span>
-                <span class="status-value" id="bearishCount">0</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">آخر تحديث</span>
-                <span class="status-value" id="lastUpdate">--:--</span>
-            </div>
-        </div>
-        
-        <div class="controls">
-            <button class="refresh-btn" onclick="loadTrends()">🔄 تحديث البيانات الآن</button>
-            <button class="test-btn" onclick="testRedisConnection()">🔍 اختبار اتصال Redis</button>
-            <div class="refresh-interval">
-                <span class="auto-refresh-indicator"></span>
-                التحديث التلقائي: كل <span id="refreshMinutes">5</span> دقائق
-            </div>
-        </div>
-        
-        <table>
-            <thead>
-                <tr>
-                    <th>الرمز</th>
-                    <th>الاتجاه</th>
-                    <th>آخر تحديث</th>
-                </tr>
-            </thead>
-            <tbody id="trendTable">
-                <tr>
-                    <td colspan="3" class="loading">⏳ جاري تحميل البيانات...</td>
-                </tr>
-            </tbody>
-        </table>
-        
-        <div class="debug-info">
-            <h3>🔧 معلومات التصحيح:</h3>
-            <div id="debugInfo">
-                جاري اختبار اتصال النظام...
-            </div>
-            <div id="nextRefreshInfo" style="margin-top: 10px; font-style: italic;">
-                التحديث التالي: <span id="nextRefreshTime">--:--</span>
-            </div>
-        </div>
-    </div>
 
-    <script>
-        // 🔧 الإعدادات - يمكن تغييرها حسب الرغبة
-        const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 دقائق بالميلي ثانية
-        let refreshTimer = null;
-        let nextRefreshTime = null;
-        
-        // تنسيق الوقت بشكل جميل
-        function formatTime(date) {
-            return date.toLocaleTimeString('ar-SA', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                second: '2-digit'
+<header>
+    <h1>📊 لوحة اتجاهات الأسهم (Live)</h1>
+</header>
+
+<div class="container">
+    <table>
+        <thead>
+            <tr>
+                <th>السهم</th>
+                <th>الاتجاه</th>
+                <th>آخر تحديث</th>
+            </tr>
+        </thead>
+        <tbody id="trendTable">
+            <tr>
+                <td colspan="3" class="loading">⏳ جاري تحميل البيانات...</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<footer>
+    Trading System Dashboard • Render Edition
+</footer>
+
+<script>
+    async function loadTrends() {
+        try {
+            const response = await fetch("/api/trends");
+            const data = await response.json();
+
+            const table = document.getElementById("trendTable");
+            table.innerHTML = "";
+
+            if (!data || data.length === 0) {
+                table.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="loading">لا توجد بيانات اتجاهات حالياً</td>
+                    </tr>`;
+                return;
+            }
+
+            data.forEach(item => {
+                const trendClass = item.trend ? item.trend.toLowerCase() : "neutral";
+                const trendText = item.trend ? item.trend.toUpperCase() : "NEUTRAL";
+
+                table.innerHTML += `
+                    <tr>
+                        <td>${item.symbol}</td>
+                        <td class="${trendClass}">${trendText}</td>
+                        <td>${item.updated_at || "-"}</td>
+                    </tr>
+                `;
             });
+
+        } catch (error) {
+            document.getElementById("trendTable").innerHTML = `
+                <tr>
+                    <td colspan="3" class="loading">❌ فشل تحميل البيانات</td>
+                </tr>`;
         }
-        
-        // حساب وقت التحديث التالي وعرضه
-        function updateNextRefreshTime() {
-            if (nextRefreshTime) {
-                const now = new Date();
-                const timeDiff = nextRefreshTime - now;
-                
-                if (timeDiff > 0) {
-                    const minutes = Math.floor(timeDiff / 60000);
-                    const seconds = Math.floor((timeDiff % 60000) / 1000);
-                    document.getElementById('nextRefreshTime').textContent = 
-                        `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                } else {
-                    document.getElementById('nextRefreshTime').textContent = 'قريباً...';
-                }
-            }
-        }
-        
-        // بدء مؤقت التحديث التلقائي
-        function startAutoRefresh() {
-            // إلغاء المؤقت السابق إذا كان موجوداً
-            if (refreshTimer) {
-                clearInterval(refreshTimer);
-            }
-            
-            // حساب وقت التحديث التالي
-            nextRefreshTime = new Date(Date.now() + REFRESH_INTERVAL);
-            
-            // بدء المؤقت الجديد
-            refreshTimer = setInterval(loadTrends, REFRESH_INTERVAL);
-            
-            // تحديث عداد الوقت كل ثانية
-            setInterval(updateNextRefreshTime, 1000);
-            
-            console.log(`✅ تم تفعيل التحديث التلقائي كل ${REFRESH_INTERVAL / 60000} دقائق`);
-        }
-        
-        async function loadTrends() {
-            try {
-                document.getElementById('trendTable').innerHTML = `
-                    <tr>
-                        <td colspan="3" class="loading">⏳ جاري تحديث البيانات...</td>
-                    </tr>`;
-                
-                document.getElementById('debugInfo').innerHTML = 'جاري جلب البيانات من Redis...';
-                
-                const response = await fetch("/api/trends");
-                const data = await response.json();
-                
-                const table = document.getElementById("trendTable");
-                table.innerHTML = "";
-                
-                if (!data || data.length === 0) {
-                    table.innerHTML = `
-                        <tr>
-                            <td colspan="3" class="loading">⚠️ لا توجد بيانات اتجاهات حالياً</td>
-                        </tr>`;
-                    document.getElementById('debugInfo').innerHTML = '❌ لم يتم العثور على بيانات في Redis. تأكد من: <br>1. اتصال Redis<br>2. وجود بيانات اتجاهات<br>3. المفاتيح الصحيحة (trend:symbols, trend:{symbol})';
-                    updateCounts(0, 0, 0);
-                    return;
-                }
-                
-                let bullishCount = 0;
-                let bearishCount = 0;
-                
-                data.forEach(item => {
-                    const trendClass = item.trend ? item.trend.toLowerCase() : "neutral";
-                    const trendText = item.trend ? item.trend.toUpperCase() : "NEUTRAL";
-                    
-                    if (trendText === 'BULLISH') bullishCount++;
-                    if (trendText === 'BEARISH') bearishCount++;
-                    
-                    table.innerHTML += `
-                        <tr>
-                            <td><strong>${item.symbol}</strong></td>
-                            <td class="${trendClass}">${trendText}</td>
-                            <td>${item.updated_at || "-"}</td>
-                        </tr>
-                    `;
-                });
-                
-                updateCounts(data.length, bullishCount, bearishCount);
-                
-                const now = new Date();
-                document.getElementById('lastUpdate').textContent = formatTime(now);
-                
-                // تحديث وقت التحديث التالي
-                nextRefreshTime = new Date(now.getTime() + REFRESH_INTERVAL);
-                
-                document.getElementById('debugInfo').innerHTML = `
-                    ✅ تم تحديث البيانات بنجاح:<br>
-                    - عدد الرموز: ${data.length}<br>
-                    - الاتجاه الصاعد: ${bullishCount}<br>
-                    - الاتجاه الهابط: ${bearishCount}<br>
-                    - وقت التحديث: ${formatTime(now)}
-                `;
-                
-            } catch (error) {
-                console.error('Error loading trends:', error);
-                document.getElementById("trendTable").innerHTML = `
-                    <tr>
-                        <td colspan="3" class="loading">❌ فشل تحميل البيانات: ${error.message}</td>
-                    </tr>`;
-                document.getElementById('debugInfo').innerHTML = `❌ خطأ في جلب البيانات: ${error.message}`;
-            }
-        }
-        
-        async function testRedisConnection() {
-            try {
-                document.getElementById('debugInfo').innerHTML = '🔍 جاري اختبار اتصال Redis...';
-                
-                const response = await fetch("/health");
-                const health = await response.json();
-                
-                const apiResponse = await fetch("/api/trends");
-                const apiData = await apiResponse.json();
-                
-                let debugHtml = `
-                    <strong>✅ اختبار النظام:</strong><br>
-                    - حالة النظام: ${health.status}<br>
-                    - واجهة API: ${apiResponse.ok ? '✅ تعمل' : '❌ لا تعمل'}<br>
-                    - عدد الاتجاهات: ${apiData ? apiData.length : 0}<br>
-                `;
-                
-                if (apiData && apiData.length > 0) {
-                    debugHtml += `
-                        <br><strong>📊 بيانات العينة:</strong><br>
-                        ${apiData.slice(0, 3).map(item => 
-                            `- ${item.symbol}: ${item.trend} (${item.updated_at})`
-                        ).join('<br>')}
-                    `;
-                }
-                
-                document.getElementById('debugInfo').innerHTML = debugHtml;
-                
-            } catch (error) {
-                document.getElementById('debugInfo').innerHTML = `
-                    ❌ فشل اختبار الاتصال:<br>
-                    ${error.message}
-                `;
-            }
-        }
-        
-        function updateCounts(total, bullish, bearish) {
-            document.getElementById('totalSymbols').textContent = total;
-            document.getElementById('bullishCount').textContent = bullish;
-            document.getElementById('bearishCount').textContent = bearish;
-        }
-        
-        // تحميل أولي
-        loadTrends();
-        
-        // بدء التحديث التلقائي كل 5 دقائق
-        startAutoRefresh();
-        
-        // إعادة تعيين التحديث التلقائي عند النقر على زر التحديث
-        document.querySelector('.refresh-btn').addEventListener('click', function() {
-            // إعادة تعيين المؤقت
-            if (refreshTimer) {
-                clearInterval(refreshTimer);
-            }
-            startAutoRefresh();
-        });
-    </script>
+    }
+
+    // تحميل أولي
+    loadTrends();
+
+    // تحديث تلقائي كل 10 ثواني
+    setInterval(loadTrends, 10000);
+</script>
+
 </body>
 </html>
