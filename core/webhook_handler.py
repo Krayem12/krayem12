@@ -1,4 +1,3 @@
-
 import json
 import re
 import logging
@@ -7,30 +6,8 @@ from typing import Dict, Optional, Tuple, List
 from collections import deque
 from datetime import datetime, timedelta
 
-# 🛠️ الإصلاح: استيراد صحيح لـ saudi_time
-try:
-    from utils.time_utils import saudi_time
-except ImportError:
-    try:
-        from ..utils.time_utils import saudi_time
-    except ImportError:
-        # ✅ بديل إذا فشل الاستيراد
-        import pytz
-        
-        class SaudiTime:
-            def __init__(self):
-                self.timezone = pytz.timezone('Asia/Riyadh')
-            
-            def now(self):
-                return datetime.now(self.timezone)
-            
-            def format_time(self, dt=None):
-                if dt is None:
-                    dt = self.now()
-                return dt.strftime('%Y-%m-%d %I:%M:%S %p')
-        
-        saudi_time = SaudiTime()
-        logging.warning("⚠️ استخدام SaudiTime البديل بسبب مشكلة الاستيراد")
+# ✅ استيراد موحد
+from utils.time_utils import saudi_time
 
 logger = logging.getLogger(__name__)
 
@@ -492,19 +469,28 @@ class WebhookHandler:
         
         logger.info(f"📊 نتيجة تحديث الاتجاه: {symbol} -> تغيير={should_report}, اتجاه قديم={old_trend}, عدد الإشارات={len(trend_signals)} - التوقيت السعودي 🇸🇦")
         
-        # 🔧 FIX: معالجة trend_signals التي تأتي كقائمة سلاسل بدلاً من قواميس
+        # ✅ إصلاح: معالجة آمنة لـ trend_signals
         signals_details = []
-        for signal in trend_signals:
-            if isinstance(signal, dict):
-                signals_details.append({
-                    "signal_type": signal.get('signal_type', 'UNKNOWN'),
-                    "direction": signal.get('direction', current_trend)
-                })
-            else:
-                signals_details.append({
-                    "signal_type": str(signal),
-                    "direction": current_trend
-                })
+        if trend_signals:
+            for signal in trend_signals:
+                try:
+                    if isinstance(signal, dict):
+                        signal_type = signal.get('signal_type')
+                        direction = signal.get('direction')
+                    elif isinstance(signal, str):
+                        signal_type = signal
+                        direction = current_trend
+                    else:
+                        signal_type = str(signal) if signal else 'UNKNOWN'
+                        direction = current_trend
+                    
+                    signals_details.append({
+                        "signal_type": signal_type or 'UNKNOWN',
+                        "direction": direction or current_trend or 'UNKNOWN'
+                    })
+                except Exception as e:
+                    logger.warning(f"⚠️ خطأ في معالجة إشارة الاتجاه: {e}")
+                    continue
         
         response_data = {
             "status": "trend_processed", 
@@ -513,7 +499,7 @@ class WebhookHandler:
             "trend_changed": should_report,
             "current_trend": current_trend,
             "old_trend": old_trend or "UNKNOWN",
-            "signals_used": len(trend_signals),
+            "signals_used": len(signals_details),
             "signals_details": signals_details,
             "timezone": "Asia/Riyadh 🇸🇦"
         }
