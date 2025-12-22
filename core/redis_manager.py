@@ -22,10 +22,11 @@ class RedisManager:
             return
             
         try:
-            redis_host = os.getenv('REDIS_HOST', 'localhost')
-            redis_port = int(os.getenv('REDIS_PORT', 6379))
-            redis_password = os.getenv('REDIS_PASSWORD', None)
-            redis_db = int(os.getenv('REDIS_DB', 0))
+            # قراءة الإعدادات من config أولاً، ثم من env
+            redis_host = config.get('REDIS_HOST') or os.getenv('REDIS_HOST', 'localhost')
+            redis_port = config.get('REDIS_PORT') or int(os.getenv('REDIS_PORT', 6379))
+            redis_password = config.get('REDIS_PASSWORD') or os.getenv('REDIS_PASSWORD', None)
+            redis_db = config.get('REDIS_DB') or int(os.getenv('REDIS_DB', 0))
             
             self.client = redis.Redis(
                 host=redis_host,
