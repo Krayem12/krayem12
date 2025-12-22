@@ -18,6 +18,7 @@ from core.group_manager import GroupManager
 from core.webhook_handler import WebhookHandler
 from notifications.notification_manager import NotificationManager
 from maintenance.cleanup_manager import CleanupManager
+from utils.time_utils import saudi_time  # ✅ استيراد موحد
 
 logger = logging.getLogger(__name__)
 
@@ -204,18 +205,35 @@ class TradingSystem:
             return render_template("trends.html")
     
     def _get_local_trends(self):
-        """🔧 الإصلاح: الحصول على الاتجاهات من TradeManager"""
+        """🔧 الإصلاح: الحصول على الاتجاهات من TradeManager بشكل آمن"""
         trends = []
         try:
-            riyadh_tz = pytz.timezone("Asia/Riyadh")
+            # ✅ التحقق من وجود trade_manager و current_trend
+            if not hasattr(self, 'trade_manager') or self.trade_manager is None:
+                logger.error("❌ trade_manager غير متوفر")
+                return trends
+                
+            if not hasattr(self.trade_manager, 'current_trend'):
+                logger.error("❌ current_trend غير متوفر في trade_manager")
+                return trends
+                
+            current_trends = self.trade_manager.current_trend
             
-            for symbol, trend in self.trade_manager.current_trend.items():
-                if trend and trend != "UNKNOWN":
-                    trends.append({
-                        "symbol": symbol,
-                        "trend": trend.upper(),
-                        "updated_at": datetime.now(riyadh_tz).strftime("%Y-%m-%d %H:%M:%S")
-                    })
+            if not isinstance(current_trends, dict):
+                logger.error("❌ current_trend ليس قاموسًا")
+                return trends
+                
+            for symbol, trend in current_trends.items():
+                try:
+                    if trend and isinstance(trend, str) and trend.upper() != "UNKNOWN":
+                        trends.append({
+                            "symbol": str(symbol) if symbol else "UNKNOWN",
+                            "trend": trend.upper(),
+                            "updated_at": saudi_time.format_time()
+                        })
+                except Exception as e:
+                    logger.warning(f"⚠️ خطأ في معالجة اتجاه الرمز {symbol}: {e}")
+                    continue
                     
         except Exception as e:
             logger.error(f"❌ خطأ في الحصول على الاتجاهات المحلية: {e}")
