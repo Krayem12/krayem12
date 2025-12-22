@@ -6,31 +6,8 @@ import threading
 from collections import defaultdict, deque
 from functools import lru_cache
 
-# 🛠️ الإصلاح: استيراد صحيح لـ saudi_time
-try:
-    from utils.time_utils import saudi_time
-except ImportError:
-    try:
-        from ..utils.time_utils import saudi_time
-    except ImportError:
-        # ✅ بديل إذا فشل الاستيراد
-        import pytz
-        from datetime import datetime
-        
-        class SaudiTime:
-            def __init__(self):
-                self.timezone = pytz.timezone('Asia/Riyadh')
-            
-            def now(self):
-                return datetime.now(self.timezone)
-            
-            def format_time(self, dt=None):
-                if dt is None:
-                    dt = self.now()
-                return dt.strftime('%Y-%m-%d %I:%M:%S %p')
-        
-        saudi_time = SaudiTime()
-        logging.warning("⚠️ استخدام SaudiTime البديل بسبب مشكلة الاستيراد")
+# ✅ استيراد موحد
+from utils.time_utils import saudi_time
 
 logger = logging.getLogger(__name__)
 
@@ -395,29 +372,33 @@ class GroupManager:
             self._handle_error("💥 خطأ في إضافة الإشارة للمجموعة", e)
 
     def _is_duplicate_signal_optimized(self, symbol: str, signal_data: Dict, group_type: str) -> bool:
-        """🎯 FIXED: منع التكرار حسب المجموعة - لا تسمح بنفس الإشارة لنفس المجموعة"""
+        """🎯 FIXED: منع التكرار حسب المجموعة مع حل مشكلة التزامن"""
         try:
             signal_type = signal_data.get('signal_type', '').lower().strip()
             if not signal_type:
                 return False
                 
-            # 🔥 التعديل: استخدام رمز + إشارة + مجموعة لمنع التكرار داخل نفس المجموعة
             signal_key = f"{symbol}_{signal_type}_{group_type}"
             current_time = saudi_time.now()
             
             with self.signal_lock:
-                # 🔍 البحث عن إشارات مكررة حديثة لنفس الرمز ونفس الإشارة ونفس المجموعة
-                for existing_key, timestamp in list(self.signal_hashes.items()):
-                    # تنظيف الإشارات القديمة تلقائياً
+                # ✅ إصلاح: إنشاء قائمة نسخة قبل التكرار
+                expired_keys = []
+                
+                # البحث عن مفاتيح منتهية
+                for existing_key, timestamp in self.signal_hashes.items():
                     if (current_time - timestamp).total_seconds() > self.duplicate_block_time:
-                        del self.signal_hashes[existing_key]
-                        continue
-                    
-                    # 🔥 التعديل: إذا كانت نفس الإشارة لنفس الرمز ونفس المجموعة
-                    if existing_key == signal_key:
-                        logger.warning(f"🚫 إشارة مكررة لنفس المجموعة: {symbol} -> {signal_type} -> {group_type}")
-                        return True
-            
+                        expired_keys.append(existing_key)
+                
+                # حذف المفاتيح المنتهية
+                for key in expired_keys:
+                    self.signal_hashes.pop(key, None)
+                
+                # التحقق من التكرار
+                if signal_key in self.signal_hashes:
+                    logger.warning(f"🚫 إشارة مكررة لنفس المجموعة: {symbol} -> {signal_type} -> {group_type}")
+                    return True
+                
                 # ✅ إضافة الإشارة الجديدة
                 self.signal_hashes[signal_key] = current_time
                 logger.info(f"🔓 السماح بالإشارة: {symbol} -> {signal_type} -> {group_type}")
@@ -495,32 +476,40 @@ class GroupManager:
             return []
 
     def _count_signals_by_direction(self, group_key: str, direction: str) -> Dict[str, int]:
-        """✅ FIXED: حساب عدد الإشارات بشكل آمن"""
+        """✅ FIXED: حساب عدد الإشارات بشكل آمن مع إرجاع قيم افتراضية"""
         try:
             if group_key not in self.pending_signals:
-                return {}
+                return {
+                    'g1': 0, 'g2': 0, 'g3': 0, 'g4': 0, 'g5': 0
+                }
                 
             groups = self.pending_signals[group_key]
             
+            # ✅ قيم افتراضية
+            default_groups = {
+                'g1': 0, 'g2': 0, 'g3': 0, 'g4': 0, 'g5': 0
+            }
+            
             if direction == "buy":
-                return {
-                    'g1': len(groups.get("group1_bullish", [])),
-                    'g2': len(groups.get("group2_bullish", [])),
-                    'g3': len(groups.get("group3_bullish", [])),
-                    'g4': len(groups.get("group4_bullish", [])),
-                    'g5': len(groups.get("group5_bullish", []))
-                }
+                for i, group_name in enumerate(['group1_bullish', 'group2_bullish', 'group3_bullish', 'group4_bullish', 'group5_bullish'], 1):
+                    if group_name in groups:
+                        try:
+                            default_groups[f'g{i}'] = len(groups[group_name])
+                        except:
+                            default_groups[f'g{i}'] = 0
             else:
-                return {
-                    'g1': len(groups.get("group1_bearish", [])),
-                    'g2': len(groups.get("group2_bearish", [])),
-                    'g3': len(groups.get("group3_bearish", [])),
-                    'g4': len(groups.get("group4_bearish", [])),
-                    'g5': len(groups.get("group5_bearish", []))
-                }
+                for i, group_name in enumerate(['group1_bearish', 'group2_bearish', 'group3_bearish', 'group4_bearish', 'group5_bearish'], 1):
+                    if group_name in groups:
+                        try:
+                            default_groups[f'g{i}'] = len(groups[group_name])
+                        except:
+                            default_groups[f'g{i}'] = 0
+            
+            return default_groups
+            
         except Exception as e:
             self._handle_error("💥 خطأ في حساب الإشارات", e)
-            return {}
+            return {'g1': 0, 'g2': 0, 'g3': 0, 'g4': 0, 'g5': 0}
 
     def _get_active_modes(self) -> List[str]:
         """الحصول على الأنماط المفعلة"""
@@ -653,8 +642,7 @@ class GroupManager:
             max_open_trades = self.config.get('MAX_OPEN_TRADES', 20)
             if total_trades >= max_open_trades:
                 logger.warning(f"🚫 وصل الحد الأقصى الإجمالي للصفقات: {total_trades}/{max_open_trades} - التوقيت السعودي 🇸🇦")
-                return False
-                return False
+                return False  # ✅ إصلاح: إزالة المكرر
             
             mode_limits = {
                 'TRADING_MODE': self.config.get('MAX_TRADES_MODE_MAIN', 20),
@@ -795,7 +783,7 @@ class GroupManager:
                 
                 if group_type in groups and groups[group_type]:
                     # 🧹 مسح جميع الإشارات المستخدمة في هذه الصفقة
-                    original_count = len(groups[group_type])  # 🔧 FIXED: تعريف هنا
+                    original_count = len(groups[group_type])
                     groups[group_type].clear()
                     logger.info(f"🧹 تم تنظيف {original_count} إشارة من {group_type} بعد فتح الصفقة")
             
@@ -827,7 +815,6 @@ class GroupManager:
                         # 🎯 استخدام عتبة التنظيف من .env بدلاً من القيمة الثابتة
                         retention_threshold = self.signal_cleanup_threshold
                         
-                        # 🔧 FIXED: تعريف original_count هنا
                         original_count = len(groups[group_type])
                         
                         groups[group_type] = deque(
