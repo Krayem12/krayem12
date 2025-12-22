@@ -32,48 +32,82 @@ class SignalProcessor:
         self._error_log.append(error_entry)
 
     def setup_signal_index(self) -> None:
-        """بناء فهرس الإشارات مع تحسين الأداء"""
+        """بناء فهرس الإشارات مع تحسينات الأمان"""
         logger.debug("🔍 بناء فهرس الإشارات...")
         try:
             index_count = 0
-            for category, signal_list in self.signals.items():
-                if signal_list:  # 🔧 FIXED: التحقق من وجود قائمة
-                    for signal in signal_list:
-                        if signal and isinstance(signal, str):  # 🔧 FIXED: التحقق من النوع
-                            normalized = signal.lower().strip()
-                            if normalized:  # 🔧 FIXED: تجاهل القيم الفارغة
-                                self.signal_index[normalized] = category
-                                index_count += 1
+            skipped_count = 0
             
-            # 🆕 تسجيل جميع الإشارات المتاحة للتصحيح
-            logger.debug(f"📋 فهرس الإشارات المبني: {index_count} إشارة")
-            for category, signals in self.signals.items():
-                if signals:  # فقط العناوين التي تحتوي على إشارات
-                    logger.debug(f"   📁 {category}: {len(signals)} إشارة - {signals[:3]}{'...' if len(signals) > 3 else ''}")
+            if not self.signals or not isinstance(self.signals, dict):
+                logger.warning("⚠️ قائمة الإشارات فارغة أو غير صالحة")
+                return
+                
+            for category, signal_list in self.signals.items():
+                if not signal_list or not isinstance(signal_list, list):
+                    logger.debug(f"⚠️ تخطي فئة {category}: قائمة فارغة أو غير صالحة")
+                    continue
                     
+                for signal in signal_list:
+                    try:
+                        # ✅ تحقق شامل
+                        if signal is None:
+                            skipped_count += 1
+                            continue
+                            
+                        if isinstance(signal, str):
+                            normalized = signal.lower().strip()
+                        else:
+                            # محاولة التحويل إلى سلسلة
+                            normalized = str(signal).lower().strip()
+                            
+                        if not normalized:
+                            skipped_count += 1
+                            continue
+                            
+                        self.signal_index[normalized] = category
+                        index_count += 1
+                        
+                    except Exception as e:
+                        logger.warning(f"⚠️ تخطي إشارة في فئة {category}: {e}")
+                        skipped_count += 1
+                        continue
+            
+            logger.debug(f"📋 فهرس الإشارات المبني: {index_count} إشارة، تم تخطي {skipped_count}")
+            
+            # تسجيل الإشارات المتاحة
+            for category, signals in self.signals.items():
+                if signals and isinstance(signals, list):
+                    valid_signals = [s for s in signals[:5] if s and isinstance(s, str)]
+                    if valid_signals:
+                        logger.debug(f"   📁 {category}: {len(signals)} إشارة - {valid_signals}{'...' if len(signals) > 5 else ''}")
+                        
         except Exception as e:
             self._handle_error("❌ خطأ في بناء فهرس الإشارات", e)
 
     def classify_signal(self, signal_data: Dict) -> str:
-        """🎯 تصنيف الإشارة بدون التخزين المؤقت للقاموس"""
-        if not signal_data or 'signal_type' not in signal_data:
-            logger.warning("❌ بيانات الإشارة غير صالحة للتصنيف")
-            return 'unknown'
+        """🎯 تصنيف الإشارة مع معالجة أخطاء محسنة"""
+        try:
+            if not signal_data or not isinstance(signal_data, dict) or 'signal_type' not in signal_data:
+                logger.warning("❌ بيانات الإشارة غير صالحة للتصنيف")
+                return 'unknown'
 
-        signal_type = signal_data['signal_type']
-        if not signal_type or not isinstance(signal_type, str) or not signal_type.strip():
-            logger.warning("❌ نوع الإشارة فارغ أو غير نصي")
-            return 'unknown'
+            signal_type = signal_data['signal_type']
+            if not signal_type or not isinstance(signal_type, str) or not signal_type.strip():
+                logger.warning("❌ نوع الإشارة فارغ أو غير نصي")
+                return 'unknown'
+                
+            signal_lower = signal_type.lower().strip()
             
-        signal_lower = signal_type.lower().strip()
-        
-        logger.debug(f"🔍 تصنيف الإشارة: '{signal_type}' -> '{signal_lower}'")
-        
-        # استخدام دالة مساعدة مع التخزين المؤقت للنص فقط
-        classification = self._classify_signal_text(signal_lower)
-        logger.debug(f"🎯 نتيجة التصنيف: '{signal_type}' -> '{classification}'")
-        
-        return classification
+            logger.debug(f"🔍 تصنيف الإشارة: '{signal_type}' -> '{signal_lower}'")
+            
+            classification = self._classify_signal_text(signal_lower)
+            logger.debug(f"🎯 نتيجة التصنيف: '{signal_type}' -> '{classification}'")
+            
+            return classification
+            
+        except Exception as e:
+            self._handle_error(f"💥 خطأ في classify_signal", e)
+            return 'unknown'
 
     @lru_cache(maxsize=1000)
     def _classify_signal_text(self, signal_text: str) -> str:
