@@ -79,7 +79,7 @@ class TradeManager:
 
         # Trend buffers
         self.trend_pool: Dict[str, dict] = defaultdict(lambda: {
-            "signals": {},   # ✅ will store signal_type -> direction
+            "signals": {},
             "count": 0
         })
         self.trend_history: Dict[str, deque] = defaultdict(
@@ -160,7 +160,7 @@ class TradeManager:
         """فتح صفقة جديدة"""
         try:
             trade_id = f"{symbol}_{direction}_{saudi_time.now().strftime('%Y%m%d%H%M%S')}_{hash(strategy_type) % 10000:04d}"
-
+            
             with self.trade_lock:
                 trade_info = {
                     'id': trade_id,
@@ -171,15 +171,15 @@ class TradeManager:
                     'opened_at': saudi_time.now().isoformat(),
                     'timezone': 'Asia/Riyadh 🇸🇦'
                 }
-
+                
                 self.active_trades[trade_id] = trade_info
                 self.symbol_trade_count[symbol] += 1
                 self.total_trade_counter += 1
                 self.metrics["trades_opened"] += 1
-
+                
                 logger.info(f"✅ تم فتح صفقة: {trade_id} - التوقيت السعودي 🇸🇦")
                 return True
-
+                
         except Exception as e:
             self._handle_error("open_trade", e)
             return False
@@ -243,48 +243,31 @@ class TradeManager:
                 pool = self.trend_pool[symbol]
 
                 signal_type = (signal_data.get("signal_type") or "").strip()
-                if not signal_type:
-                    return False, old_trend, []
+                if signal_type:
+                    pool["signals"][signal_type] = True
 
-                # ✅ FIX: store direction per signal (not True)
-                pool["signals"][signal_type] = direction
-
-                # ✅ FIX: read the correct env key (fallback to old key for compatibility)
                 required = int(
-                    self.config.get("TREND_REQUIRED_SIGNALS",
-                                    self.config.get("TREND_CHANGE_THRESHOLD", 2))
+                    self.config.get("TREND_CHANGE_THRESHOLD", 2)
                 )
-
-                # Not enough confirmations yet
                 if len(pool["signals"]) < required:
                     return False, old_trend, []
 
-                # ✅ FIX: prevent conflicting trend signals from changing trend
-                directions = set(pool["signals"].values())
-                if len(directions) != 1:
-                    logger.warning(f"⚠️ Trend conflict for {symbol}: {pool['signals']}")
-                    # reset pool to avoid stale mixed signals
-                    self.trend_pool[symbol] = {"signals": {}, "count": 0}
-                    return False, old_trend, []
-
-                new_trend = directions.pop()
-
                 # Confirm change
                 self.previous_trend[symbol] = old_trend
-                self.current_trend[symbol] = new_trend
-                self.last_reported_trend[symbol] = new_trend
+                self.current_trend[symbol] = direction
+                self.last_reported_trend[symbol] = direction
                 self.trend_strength[symbol] += 1
 
                 self.trend_history[symbol].append({
                     "time": saudi_time.now().isoformat(),
                     "old": old_trend,
-                    "new": new_trend,
+                    "new": direction,
                     "signals": list(pool["signals"].keys())
                 })
 
                 if self.redis_enabled:
                     try:
-                        self.redis.set_trend(symbol, new_trend)
+                        self.redis.set_trend(symbol, direction)
                         self._redis_set_raw(
                             f"trend_updated_at:{symbol}",
                             saudi_time.now().isoformat()
@@ -295,23 +278,90 @@ class TradeManager:
                 used = list(pool["signals"].keys())
                 self.trend_pool[symbol] = {"signals": {}, "count": 0}
 
-                return old_trend != new_trend, old_trend, used
+                return old_trend != direction, old_trend, used
 
         except Exception as e:
             self._handle_error("update_trend", e)
             return False, self.get_current_trend(symbol), []
 
-    def _determine_trend_direction(
-        self, signal_data: Dict
-    ) -> Optional[str]:
+    def _determine_trend_direction(self, signal_data: Dict) -> Optional[str]:
+        """🎯 تحديد اتجاه الإشارة بدقة باستخدام قوائم الإشارات من الإعدادات"""
         try:
-            text = (signal_data.get("signal_type") or "").lower()
-            if "bull" in text or "up" in text:
+            signal_type = (signal_data.get("signal_type") or "").lower().strip()
+            
+            if not signal_type:
+                logger.warning("⚠️ نوع الإشارة فارغ")
+                return None
+            
+            logger.debug(f"🔍 فحص اتجاه الإشارة: '{signal_type}'")
+            
+            # الحصول على قوائم الإشارات من الإعدادات
+            config = getattr(self, 'config', {})
+            
+            # تحليل إشارات TREND من الإعدادات
+            trend_signals_str = config.get('TREND_SIGNALS', '')
+            trend_signals = [s.strip() for s in trend_signals_str.split(',') if s.strip()]
+            
+            # فصل الإشارات الصاعدة والهابطة
+            bullish_trend_signals = []
+            bearish_trend_signals = []
+            
+            for signal in trend_signals:
+                signal_lower = signal.lower()
+                if 'bull' in signal_lower or 'up' in signal_lower:
+                    bullish_trend_signals.append(signal_lower)
+                elif 'bear' in signal_lower or 'down' in signal_lower:
+                    bearish_trend_signals.append(signal_lower)
+            
+            # تحقق من إشارات الصعود المحددة
+            if signal_type in bullish_trend_signals:
+                logger.info(f"🎯 إشارة صعود محددة: {signal_type} -> bullish")
                 return "bullish"
-            if "bear" in text or "down" in text:
+            
+            # تحقق من إشارات الهبوط المحددة
+            if signal_type in bearish_trend_signals:
+                logger.info(f"🎯 إشارة هبوط محددة: {signal_type} -> bearish")
                 return "bearish"
+            
+            # التحقق من الكلمات المفتاحية
+            bullish_keywords_str = config.get('BULLISH_KEYWORDS', 'bullish,buy,long,up,rise,increase')
+            bearish_keywords_str = config.get('BEARISH_KEYWORDS', 'bearish,sell,short,down,fall,decrease')
+            
+            bullish_keywords = [k.strip().lower() for k in bullish_keywords_str.split(',') if k.strip()]
+            bearish_keywords = [k.strip().lower() for k in bearish_keywords_str.split(',') if k.strip()]
+            
+            # التحقق من الكلمات المفتاحية للصعود
+            for keyword in bullish_keywords:
+                if keyword and keyword in signal_type:
+                    logger.info(f"🎯 كلمة صعود مفتاحية: '{keyword}' في '{signal_type}' -> bullish")
+                    return "bullish"
+            
+            # التحقق من الكلمات المفتاحية للهبوط
+            for keyword in bearish_keywords:
+                if keyword and keyword in signal_type:
+                    logger.info(f"🎯 كلمة هبوط مفتاحية: '{keyword}' في '{signal_type}' -> bearish")
+                    return "bearish"
+            
+            # التحقق العام (كخطة احتياطية)
+            if 'bull' in signal_type or 'up' in signal_type or 'buy' in signal_type:
+                logger.info(f"🎯 اكتشاف صعود عام: {signal_type} -> bullish")
+                return "bullish"
+            
+            if 'bear' in signal_type or 'down' in signal_type or 'sell' in signal_type:
+                logger.info(f"🎯 اكتشاف هبوط عام: {signal_type} -> bearish")
+                return "bearish"
+            
+            # 🔍 تسجيل إشارات الاتجاه المتاحة للمساعدة في التصحيح
+            logger.debug(f"📋 إشارات الصعود المتاحة: {bullish_trend_signals}")
+            logger.debug(f"📋 إشارات الهبوط المتاحة: {bearish_trend_signals}")
+            logger.debug(f"📋 كلمات الصعود المفتاحية: {bullish_keywords}")
+            logger.debug(f"📋 كلمات الهبوط المفتاحية: {bearish_keywords}")
+            
+            logger.warning(f"⚠️ اتجاه غير محدد للإشارة: {signal_type}")
             return None
-        except Exception:
+            
+        except Exception as e:
+            self._handle_error("_determine_trend_direction", e)
             return None
 
     # ======================================================
