@@ -9,22 +9,8 @@ from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict, deque
 
-# ----------------------------------------------------------
-# 🕒 Saudi Time
-# ----------------------------------------------------------
-import pytz
-from datetime import datetime
-
-class SaudiTime:
-    timezone = pytz.timezone('Asia/Riyadh')
-    
-    @classmethod
-    def now(cls):
-        return datetime.now(cls.timezone)
-    
-    @classmethod
-    def isoformat(cls):
-        return cls.now().isoformat()
+# ✅ استيراد موحد
+from utils.time_utils import saudi_time
 
 # ----------------------------------------------------------
 # 🔴 Redis Manager
@@ -139,7 +125,7 @@ class TradeManager:
     def open_trade(self, symbol: str, direction: str, strategy_type: str, mode_key: str) -> bool:
         """فتح صفقة جديدة"""
         try:
-            trade_id = f"{symbol}_{direction}_{SaudiTime.now().strftime('%Y%m%d%H%M%S')}_{hash(strategy_type) % 10000:04d}"
+            trade_id = f"{symbol}_{direction}_{saudi_time.now().strftime('%Y%m%d%H%M%S')}_{hash(strategy_type) % 10000:04d}"
             
             with self.trade_lock:
                 trade_info = {
@@ -148,7 +134,7 @@ class TradeManager:
                     'direction': direction,
                     'strategy_type': strategy_type,
                     'mode': mode_key,
-                    'opened_at': SaudiTime.isoformat(),
+                    'opened_at': saudi_time.isoformat(),
                     'timezone': 'Asia/Riyadh 🇸🇦'
                 }
                 
@@ -243,7 +229,7 @@ class TradeManager:
                 # إضافة الإشارة إلى المجمع
                 pool["signals"][signal_type] = {
                     "direction": direction,
-                    "timestamp": SaudiTime.isoformat()
+                    "timestamp": saudi_time.isoformat()
                 }
                 pool["count"] = len(pool["signals"])
                 
@@ -289,7 +275,7 @@ class TradeManager:
                     
                     # تسجيل في التاريخ
                     self.trend_history[symbol].append({
-                        "time": SaudiTime.isoformat(),
+                        "time": saudi_time.isoformat(),
                         "old": old_trend,
                         "new": new_direction,
                         "signals": signals_used,
@@ -303,7 +289,7 @@ class TradeManager:
                             self.redis.set_trend(symbol, new_direction)
                             self._redis_set_raw(
                                 f"trend:{symbol}:updated_at",
-                                SaudiTime.isoformat()
+                                saudi_time.isoformat()
                             )
                         except Exception as e:
                             logger.warning(f"⚠️ حفظ Redis فشل: {e}")
@@ -409,7 +395,7 @@ class TradeManager:
                 "signals_in_pool": len(pool["signals"]),
                 "signal_analysis": signal_analysis,
                 "required_signals": self.config.get("TREND_REQUIRED_SIGNALS", 2),
-                "timestamp": SaudiTime.isoformat(),
+                "timestamp": saudi_time.isoformat(),
                 "timezone": "Asia/Riyadh 🇸🇦"
             }
         except Exception as e:
@@ -440,7 +426,7 @@ class TradeManager:
                 
                 # تسجيل في التاريخ
                 self.trend_history[symbol].append({
-                    "time": SaudiTime.isoformat(),
+                    "time": saudi_time.isoformat(),
                     "old": old_trend,
                     "new": direction,
                     "signals": ["MANUAL_FORCE"],
@@ -522,7 +508,7 @@ class TradeManager:
     def cleanup_memory(self):
         """تنظيف الذاكرة"""
         try:
-            cutoff = SaudiTime.now() - timedelta(days=7)
+            cutoff = saudi_time.now() - timedelta(days=7)
             cleaned_count = 0
             
             for symbol, hist in list(self.trend_history.items()):
@@ -559,7 +545,7 @@ class TradeManager:
                 'total_trades_closed': self.metrics["trades_closed"],
                 'redis_enabled': self.redis_enabled,
                 'error_log_size': len(self._error_log),
-                'timestamp': SaudiTime.isoformat(),
+                'timestamp': saudi_time.isoformat(),
                 'timezone': 'Asia/Riyadh 🇸🇦'
             }
         except Exception as e:
@@ -573,7 +559,7 @@ class TradeManager:
         """معالجة الأخطاء"""
         logger.error(f"{where}: {exc}")
         self._error_log.append({
-            "time": SaudiTime.isoformat(),
+            "time": saudi_time.isoformat(),
             "where": where,
             "error": str(exc)
         })
