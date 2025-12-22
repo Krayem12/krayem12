@@ -1,3 +1,4 @@
+# trading_system.py - النسخة المحدثة
 # trading_system.py
 import schedule
 import threading
@@ -20,26 +21,38 @@ from notifications.notification_manager import NotificationManager
 from maintenance.cleanup_manager import CleanupManager
 from utils.time_utils import saudi_time  # ✅ استيراد موحد
 
+# ✅ استيراد المكونات الجديدة
+try:
+    from core.group_mapper import GroupMapper
+    from core.debug_guard import DebugGuard
+    GROUP_MAPPER_AVAILABLE = True
+    DEBUG_GUARD_AVAILABLE = True
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.warning(f"⚠️ المكونات الجديدة غير متوفرة: {e}")
+    GROUP_MAPPER_AVAILABLE = False
+    DEBUG_GUARD_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 class TradingSystem:
-    """🎯 Trading System with DETAILED TREND CHANGE NOTIFICATIONS"""
+    """🎯 Trading System with GROUP MAPPER & DEBUG GUARD SUPPORT"""
 
     def __init__(self):
-        logger.info("🚀 Starting Trading System with COMPLETE METHOD IMPLEMENTATION + GROUP3 + GROUP4 + GROUP5...")
+        logger.info("🚀 Starting Trading System with GROUP MAPPER + DEBUG GUARD...")
         try:
             self.setup_managers()
             self.setup_flask()
             self.setup_trend_routes()
             self.setup_scheduler()
             self.display_system_info()
-            logger.info("✅ System initialized successfully")
+            logger.info("✅ System initialized successfully with new components")
         except Exception as e:
             logger.error(f"❌ System initialization failed: {e}")
             raise
 
     def setup_managers(self):
-        logger.info("🔧 جاري تهيئة المديرين...")
+        logger.info("🔧 جاري تهيئة المديرين مع المكونات الجديدة...")
 
         self.config_manager = ConfigManager()
         self.config = self.config_manager.config
@@ -55,8 +68,13 @@ class TradingSystem:
         self.keywords = self.config_manager.keywords
 
         self.signal_processor = SignalProcessor(self.config, self.signals, self.keywords)
+        
+        # ✅ إنشاء TradeManager مع دعم GroupMapper
         self.trade_manager = TradeManager(self.config)
+        
+        # ✅ إنشاء GroupManager مع GroupMapper
         self.group_manager = GroupManager(self.config, self.trade_manager)
+        
         self.notification_manager = NotificationManager(self.config)
 
         self.trade_manager.set_group_manager(self.group_manager)
@@ -69,6 +87,7 @@ class TradingSystem:
             self.notification_manager
         )
 
+        # ✅ إنشاء WebhookHandler مع DebugGuard
         self.webhook_handler = WebhookHandler(
             self.config,
             self.signal_processor,
@@ -78,10 +97,32 @@ class TradingSystem:
             self.cleanup_manager
         )
 
-        logger.info("✅ تم تهيئة جميع المديرين بنجاح")
+        # ✅ التحقق من المكونات الجديدة
+        self._check_new_components()
+        
+        logger.info("✅ تم تهيئة جميع المديرين بنجاح مع المكونات الجديدة")
+
+    def _check_new_components(self):
+        """التحقق من توفر المكونات الجديدة"""
+        try:
+            # التحقق من GroupMapper
+            if hasattr(self.group_manager, 'group_mapper'):
+                logger.info("✅ GroupMapper مفعل في GroupManager")
+            else:
+                logger.warning("⚠️ GroupMapper غير مفعل في GroupManager")
+            
+            # التحقق من DebugGuard
+            if hasattr(self.webhook_handler, 'debug_guard'):
+                debug_status = self.webhook_handler.debug_guard.get_debug_status()
+                logger.info(f"✅ DebugGuard مفعل - حالة: {debug_status.get('debug_enabled', False)}")
+            else:
+                logger.warning("⚠️ DebugGuard غير مفعل في WebhookHandler")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ خطأ في التحقق من المكونات الجديدة: {e}")
 
     def setup_flask(self):
-        logger.info("🔧 جاري تهيئة Flask...")
+        logger.info("🔧 جاري تهيئة Flask مع المكونات الجديدة...")
 
         templates_path = os.path.join(os.path.dirname(__file__), "..", "templates")
         self.app = Flask(__name__, template_folder=templates_path)
@@ -90,7 +131,12 @@ class TradingSystem:
         def home():
             return {
                 "status": "running",
-                "system": "Trading System",
+                "system": "Trading System with GroupMapper & DebugGuard",
+                "version": "1.2.0",
+                "components": {
+                    "group_mapper": GROUP_MAPPER_AVAILABLE,
+                    "debug_guard": DEBUG_GUARD_AVAILABLE
+                },
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -183,7 +229,8 @@ class TradingSystem:
                     trends.append({
                         "symbol": symbol,
                         "trend": str(trend_val),
-                        "updated_at": updated_at_sa
+                        "updated_at": updated_at_sa,
+                        "group_mapper": GROUP_MAPPER_AVAILABLE
                     })
 
                 trends.sort(key=lambda x: x["symbol"])
@@ -229,7 +276,8 @@ class TradingSystem:
                         trends.append({
                             "symbol": str(symbol) if symbol else "UNKNOWN",
                             "trend": trend.upper(),
-                            "updated_at": saudi_time.format_time()
+                            "updated_at": saudi_time.format_time(),
+                            "group_mapper": hasattr(self.trade_manager, 'group_mapper') and self.trade_manager.group_mapper is not None
                         })
                 except Exception as e:
                     logger.warning(f"⚠️ خطأ في معالجة اتجاه الرمز {symbol}: {e}")
@@ -245,16 +293,38 @@ class TradingSystem:
 
     def display_system_info(self):
         self.config_manager.display_config()
+        
+        # ✅ عرض معلومات المكونات الجديدة
+        logger.info("🔍 معلومات المكونات الجديدة:")
+        logger.info(f"   📦 GroupMapper: {'✅ متوفر' if GROUP_MAPPER_AVAILABLE else '❌ غير متوفر'}")
+        logger.info(f"   🔒 DebugGuard: {'✅ متوفر' if DEBUG_GUARD_AVAILABLE else '❌ غير متوفر'}")
+        
+        if hasattr(self.group_manager, 'group_mapper'):
+            try:
+                stats = self.group_manager.group_mapper.get_group_statistics(self.config)
+                logger.info(f"   📊 المجموعات: {stats['enabled_groups']}/{stats['total_groups']} مفعلة")
+            except:
+                logger.info("   📊 المجموعات: معلومات غير متوفرة")
 
     def get_system_status(self):
         return {
             "status": "active",
             "port": self.port,
+            "version": "1.2.0_with_group_mapper",
+            "components": {
+                "group_mapper": GROUP_MAPPER_AVAILABLE,
+                "debug_guard": DEBUG_GUARD_AVAILABLE,
+                "trade_manager": hasattr(self.trade_manager, 'group_mapper') and self.trade_manager.group_mapper is not None,
+                "group_manager": hasattr(self.group_manager, 'group_mapper') and self.group_manager.group_mapper is not None,
+                "webhook_handler": hasattr(self.webhook_handler, 'debug_guard') and self.webhook_handler.debug_guard is not None
+            },
             "timestamp": datetime.now().isoformat()
         }
 
     def run(self):
         logger.info(f"🚀 تشغيل النظام على المنفذ {self.port}")
+        logger.info(f"🔧 المكونات الجديدة: GroupMapper={'✅' if GROUP_MAPPER_AVAILABLE else '❌'}, DebugGuard={'✅' if DEBUG_GUARD_AVAILABLE else '❌'}")
+        
         self.app.run(
             host="0.0.0.0",
             port=self.port,
