@@ -1,12 +1,12 @@
 # core/trade_manager.py
 # ==========================================================
-# ✅ TradeManager – FINAL & COMPATIBLE VERSION
+# ✅ TradeManager – FINAL VERSION
 # ==========================================================
 
 import logging
 import threading
 from datetime import timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from collections import defaultdict, deque
 
 # ----------------------------------------------------------
@@ -44,10 +44,7 @@ logger = logging.getLogger(__name__)
 class TradeManager:
     """
     TradeManager – FINAL VERSION
-
-    ✔ يدير الاتجاهات (Trend)
-    ✔ متوافق بالكامل مع GroupManager و TradingSystem
-    ✔ يحتوي جميع الدوال المتوقعة (Contracts)
+    ✔ يدير الاتجاهات (Trend) ولا يرسل إشعار إلا عند تحديد اتجاه واضح
     """
 
     # ======================================================
@@ -124,9 +121,7 @@ class TradeManager:
     # 🔧 REQUIRED BY GroupManager
     # ======================================================
     def count_trades_by_mode(self, symbol: str, mode_key: str) -> int:
-        """
-        Count open trades for a symbol within a trading mode.
-        """
+        """عدد الصفقات المفتوحة للنمط"""
         try:
             with self.trade_lock:
                 return sum(
@@ -139,9 +134,7 @@ class TradeManager:
             return 0
 
     def get_active_trades_count(self, symbol: str = None) -> int:
-        """
-        Count all open trades for a symbol, or total trades if no symbol.
-        """
+        """عدد الصفقات النشطة"""
         try:
             with self.trade_lock:
                 if symbol:
@@ -150,7 +143,6 @@ class TradeManager:
                         if trade.get("symbol") == symbol
                     )
                 else:
-                    # 🔧 FIXED: إرجاع إجمالي عدد الصفقات عندما لا يتم تمرير رمز
                     return len(self.active_trades)
         except Exception as e:
             logger.error(f"get_active_trades_count failed: {e}")
@@ -185,9 +177,7 @@ class TradeManager:
             return False
 
     def handle_exit_signal(self, symbol: str, reason: str = "") -> int:
-        """
-        Close all trades for a symbol.
-        """
+        """إغلاق جميع صفقات الرمز"""
         closed = 0
         try:
             with self.trade_lock:
@@ -201,18 +191,18 @@ class TradeManager:
 
             if closed:
                 self.metrics["trades_closed"] += closed
-                logger.info(
-                    f"🔚 Closed {closed} trades for {symbol} - {reason}"
-                )
+                logger.info(f"🔚 تم إغلاق {closed} صفقة لـ {symbol}")
+
         except Exception as e:
             logger.error(f"handle_exit_signal failed: {e}")
 
         return closed
 
     # ======================================================
-    # 📈 TREND HANDLING
+    # 📈 TREND HANDLING - النسخة النهائية
     # ======================================================
     def get_current_trend(self, symbol: str) -> str:
+        """الحصول على الاتجاه الحالي"""
         try:
             trend = self.current_trend.get(symbol)
             if trend:
@@ -229,13 +219,13 @@ class TradeManager:
             self._handle_error("get_current_trend", e)
             return "UNKNOWN"
 
-    def update_trend(
-        self, symbol: str, classification: str, signal_data: Dict
-    ) -> (bool, str, List[str]):
-
+    def update_trend(self, symbol: str, classification: str, signal_data: Dict) -> Tuple[bool, str, List[str]]:
+        """🎯 تحديث الاتجاه - لا يرسل إشعار إلا عند تحديد اتجاه واضح"""
         try:
-            direction = self._determine_trend_direction(signal_data)
+            # تحديد اتجاه الإشارة
+            direction = self._determine_trend_direction_enhanced(signal_data, classification)
             if not direction:
+                logger.info(f"📭 إشارة بدون اتجاه واضح: {signal_data.get('signal_type')}")
                 return False, self.get_current_trend(symbol), []
 
             with self.trend_lock:
@@ -243,129 +233,154 @@ class TradeManager:
                 pool = self.trend_pool[symbol]
 
                 signal_type = (signal_data.get("signal_type") or "").strip()
-                if signal_type:
-                    pool["signals"][signal_type] = True
-
-                required = int(
-                    self.config.get("TREND_CHANGE_THRESHOLD", 2)
-                )
-                if len(pool["signals"]) < required:
+                if not signal_type:
                     return False, old_trend, []
 
-                # Confirm change
-                self.previous_trend[symbol] = old_trend
-                self.current_trend[symbol] = direction
-                self.last_reported_trend[symbol] = direction
-                self.trend_strength[symbol] += 1
-
-                self.trend_history[symbol].append({
-                    "time": saudi_time.now().isoformat(),
-                    "old": old_trend,
-                    "new": direction,
-                    "signals": list(pool["signals"].keys())
-                })
-
-                if self.redis_enabled:
-                    try:
-                        self.redis.set_trend(symbol, direction)
-                        self._redis_set_raw(
-                            f"trend_updated_at:{symbol}",
-                            saudi_time.now().isoformat()
-                        )
-                    except Exception as e:
-                        logger.warning(f"⚠️ Redis save failed: {e}")
-
-                used = list(pool["signals"].keys())
-                self.trend_pool[symbol] = {"signals": {}, "count": 0}
-
-                return old_trend != direction, old_trend, used
+                required = self.config.get("TREND_REQUIRED_SIGNALS", 2)
+                
+                # 🎯 التحقق من التعارض مع الإشارات الموجودة
+                existing_directions = []
+                for sig_info in pool["signals"].values():
+                    existing_directions.append(sig_info.get("direction"))
+                
+                if existing_directions:
+                    # إذا كانت الإشارة الجديدة تتعارض مع الموجودة
+                    if direction not in existing_directions:
+                        logger.warning(f"⚠️ تعارض اتجاهات: {signal_type} -> {direction} يختلف عن {existing_directions}")
+                        
+                        # 🎯 حذف المجمع القديم وبدء جديد
+                        self.trend_pool[symbol] = {"signals": {}, "count": 0}
+                        pool = self.trend_pool[symbol]
+                        
+                        logger.info(f"🔄 تمت إعادة تعيين المجمع بسبب التعارض")
+                
+                # إضافة الإشارة الجديدة
+                pool["signals"][signal_type] = {
+                    "direction": direction,
+                    "timestamp": saudi_time.now().isoformat()
+                }
+                pool["count"] = len(pool["signals"])
+                
+                logger.info(f"📥 تمت إضافة الإشارة: {signal_type} -> {direction}")
+                
+                # 🎯 التحقق مما إذا كان لدينا إشارات كافية في نفس الاتجاه
+                direction_counts = {"bullish": 0, "bearish": 0}
+                for sig_info in pool["signals"].values():
+                    sig_direction = sig_info.get("direction")
+                    if sig_direction in direction_counts:
+                        direction_counts[sig_direction] += 1
+                
+                logger.info(f"📊 حالة المجمع: إشارات={pool['count']}, صاعدة={direction_counts['bullish']}, هابطة={direction_counts['bearish']}")
+                
+                # 🎯 القاعدة: ننتظر حتى نحصل على إشارتين في نفس الاتجاه
+                new_direction = None
+                signals_used = []
+                
+                if direction_counts["bullish"] >= required:
+                    new_direction = "bullish"
+                    signals_used = [sig for sig, info in pool["signals"].items() if info.get("direction") == "bullish"]
+                    logger.info(f"✅ تم تحديد اتجاه صاعد: {direction_counts['bullish']} إشارة")
+                    
+                elif direction_counts["bearish"] >= required:
+                    new_direction = "bearish"
+                    signals_used = [sig for sig, info in pool["signals"].items() if info.get("direction") == "bearish"]
+                    logger.info(f"✅ تم تحديد اتجاه هابط: {direction_counts['bearish']} إشارة")
+                
+                # 🎯 إذا لم نحصل على إشارات كافية في نفس الاتجاه
+                if not new_direction:
+                    logger.info(f"⏸️ إشارات غير كافية لاتجاه واضح: تحتاج {required} إشارة في نفس الاتجاه")
+                    
+                    # 🎯 إذا كان هناك تعارض (إشارات في اتجاهين مختلفين)
+                    if direction_counts["bullish"] > 0 and direction_counts["bearish"] > 0:
+                        logger.warning(f"⚠️ تعارض: إشارات في اتجاهين مختلفين - صاعدة: {direction_counts['bullish']}, هابطة: {direction_counts['bearish']}")
+                        # 🎯 إعادة تعيين المجمع لبدء جديدة
+                        self.trend_pool[symbol] = {"signals": {}, "count": 0}
+                        logger.info(f"🧹 تم إعادة تعيين المجمع بسبب التعارض")
+                    
+                    # 🎯 لا نرسل إشعار عند عدم وجود اتجاه واضح
+                    return False, old_trend, []
+                
+                # 🎯 إذا وصلنا هنا، فهذا يعني أن لدينا اتجاه واضح
+                trend_changed = (old_trend != new_direction)
+                
+                if trend_changed:
+                    # تحديث بيانات الاتجاه
+                    self.previous_trend[symbol] = old_trend
+                    self.current_trend[symbol] = new_direction
+                    self.last_reported_trend[symbol] = new_direction
+                    self.trend_strength[symbol] = len(signals_used)
+                    
+                    # تسجيل في التاريخ
+                    self.trend_history[symbol].append({
+                        "time": saudi_time.now().isoformat(),
+                        "old": old_trend,
+                        "new": new_direction,
+                        "signals": signals_used,
+                        "signal_count": len(signals_used),
+                        "reason": f"تجميع {len(signals_used)} إشارة {new_direction}"
+                    })
+                    
+                    # حفظ في Redis
+                    if self.redis_enabled:
+                        try:
+                            self.redis.set_trend(symbol, new_direction)
+                            self._redis_set_raw(
+                                f"trend:{symbol}:updated_at",
+                                saudi_time.now().isoformat()
+                            )
+                        except Exception as e:
+                            logger.warning(f"⚠️ حفظ Redis فشل: {e}")
+                    
+                    # 🎯 مسح المجمع بعد تحديد الاتجاه
+                    self.trend_pool[symbol] = {"signals": {}, "count": 0}
+                    
+                    logger.info(f"🎯 تم تغيير الاتجاه: {symbol} -> {old_trend} → {new_direction}")
+                    return True, old_trend, signals_used
+                else:
+                    # نفس الاتجاه، لا تغيير
+                    logger.info(f"⏸️ نفس الاتجاه: {symbol} -> {new_direction}")
+                    
+                    # 🎯 مسح المجمع بعد تأكيد الاتجاه
+                    self.trend_pool[symbol] = {"signals": {}, "count": 0}
+                    
+                    return False, old_trend, signals_used
 
         except Exception as e:
             self._handle_error("update_trend", e)
             return False, self.get_current_trend(symbol), []
 
-    def _determine_trend_direction(self, signal_data: Dict) -> Optional[str]:
-        """🎯 تحديد اتجاه الإشارة بدقة باستخدام قوائم الإشارات من الإعدادات"""
+    def _determine_trend_direction_enhanced(self, signal_data: Dict, classification: str = None) -> Optional[str]:
+        """تحديد اتجاه الإشارة بدقة"""
         try:
             signal_type = (signal_data.get("signal_type") or "").lower().strip()
             
             if not signal_type:
-                logger.warning("⚠️ نوع الإشارة فارغ")
                 return None
             
-            logger.debug(f"🔍 فحص اتجاه الإشارة: '{signal_type}'")
-            
-            # الحصول على قوائم الإشارات من الإعدادات
-            config = getattr(self, 'config', {})
-            
-            # تحليل إشارات TREND من الإعدادات
-            trend_signals_str = config.get('TREND_SIGNALS', '')
-            trend_signals = [s.strip() for s in trend_signals_str.split(',') if s.strip()]
-            
-            # فصل الإشارات الصاعدة والهابطة
-            bullish_trend_signals = []
-            bearish_trend_signals = []
-            
-            for signal in trend_signals:
-                signal_lower = signal.lower()
-                if 'bull' in signal_lower or 'up' in signal_lower:
-                    bullish_trend_signals.append(signal_lower)
-                elif 'bear' in signal_lower or 'down' in signal_lower:
-                    bearish_trend_signals.append(signal_lower)
-            
-            # تحقق من إشارات الصعود المحددة
-            if signal_type in bullish_trend_signals:
-                logger.info(f"🎯 إشارة صعود محددة: {signal_type} -> bullish")
+            # 🎯 قواعد تحديد الاتجاه
+            if 'money_flow_down' in signal_type:
+                return "bearish"
+            if 'money_flow_up' in signal_type:
                 return "bullish"
-            
-            # تحقق من إشارات الهبوط المحددة
-            if signal_type in bearish_trend_signals:
-                logger.info(f"🎯 إشارة هبوط محددة: {signal_type} -> bearish")
+            if 'trend_catcher_bullish' in signal_type:
+                return "bullish"
+            if 'trend_catcher_bearish' in signal_type:
                 return "bearish"
             
-            # التحقق من الكلمات المفتاحية
-            bullish_keywords_str = config.get('BULLISH_KEYWORDS', 'bullish,buy,long,up,rise,increase')
-            bearish_keywords_str = config.get('BEARISH_KEYWORDS', 'bearish,sell,short,down,fall,decrease')
-            
-            bullish_keywords = [k.strip().lower() for k in bullish_keywords_str.split(',') if k.strip()]
-            bearish_keywords = [k.strip().lower() for k in bearish_keywords_str.split(',') if k.strip()]
-            
-            # التحقق من الكلمات المفتاحية للصعود
-            for keyword in bullish_keywords:
-                if keyword and keyword in signal_type:
-                    logger.info(f"🎯 كلمة صعود مفتاحية: '{keyword}' في '{signal_type}' -> bullish")
-                    return "bullish"
-            
-            # التحقق من الكلمات المفتاحية للهبوط
-            for keyword in bearish_keywords:
-                if keyword and keyword in signal_type:
-                    logger.info(f"🎯 كلمة هبوط مفتاحية: '{keyword}' في '{signal_type}' -> bearish")
-                    return "bearish"
-            
-            # التحقق العام (كخطة احتياطية)
-            if 'bull' in signal_type or 'up' in signal_type or 'buy' in signal_type:
-                logger.info(f"🎯 اكتشاف صعود عام: {signal_type} -> bullish")
+            # الكلمات المفتاحية
+            if any(word in signal_type for word in ['bull', 'up', 'buy', 'long', 'rise']):
                 return "bullish"
-            
-            if 'bear' in signal_type or 'down' in signal_type or 'sell' in signal_type:
-                logger.info(f"🎯 اكتشاف هبوط عام: {signal_type} -> bearish")
+            if any(word in signal_type for word in ['bear', 'down', 'sell', 'short', 'fall']):
                 return "bearish"
             
-            # 🔍 تسجيل إشارات الاتجاه المتاحة للمساعدة في التصحيح
-            logger.debug(f"📋 إشارات الصعود المتاحة: {bullish_trend_signals}")
-            logger.debug(f"📋 إشارات الهبوط المتاحة: {bearish_trend_signals}")
-            logger.debug(f"📋 كلمات الصعود المفتاحية: {bullish_keywords}")
-            logger.debug(f"📋 كلمات الهبوط المفتاحية: {bearish_keywords}")
-            
-            logger.warning(f"⚠️ اتجاه غير محدد للإشارة: {signal_type}")
             return None
             
         except Exception as e:
-            self._handle_error("_determine_trend_direction", e)
+            self._handle_error("_determine_trend_direction_enhanced", e)
             return None
 
     # ======================================================
-    # 🔴 REDIS HELPERS
+    # 🧹 CLEANUP & HELPERS
     # ======================================================
     def _redis_set_raw(self, key: str, value: str):
         if not self.redis_enabled or not self.redis:
@@ -388,10 +403,8 @@ class TradeManager:
         except Exception as e:
             logger.warning(f"⚠️ Redis load trends failed: {e}")
 
-    # ======================================================
-    # 🧹 CLEANUP
-    # ======================================================
     def cleanup_memory(self):
+        """تنظيف الذاكرة"""
         try:
             cutoff = saudi_time.now() - timedelta(days=7)
             for symbol, hist in list(self.trend_history.items()):
@@ -405,10 +418,8 @@ class TradeManager:
         except Exception as e:
             self._handle_error("cleanup_memory", e)
 
-    # ======================================================
-    # 🧾 ERROR LOG
-    # ======================================================
     def _handle_error(self, where: str, exc: Exception):
+        """معالجة الأخطاء"""
         logger.error(f"{where}: {exc}")
         self._error_log.append({
             "time": saudi_time.now().isoformat(),
