@@ -2,7 +2,6 @@
 """
 🔒 DebugGuard - حماية واجهات التصحيح
 ======================================
-يمنع الوصول غير المصرح به لواجهات التصحيح في بيئة الإنتاج
 """
 
 import os
@@ -11,41 +10,104 @@ import hashlib
 import hmac
 from functools import wraps
 from typing import Optional, Callable, Set, Dict, Any
-from flask import request, jsonify
+from flask import request, jsonify, has_request_context
+import threading
 
 logger = logging.getLogger(__name__)
 
 class DebugGuard:
-    """حارس واجهات التصحيح"""
+    """حارس واجهات التصحيح مع إدارة آمنة للـ Request Context"""
     
     def __init__(self, config: dict):
         self.config = config
         
-        # قراءة الإعدادات
-        self.debug_enabled = self._parse_bool(config.get('DEBUG_ENABLED', 'false'))
-        self.debug_api_key = config.get('DEBUG_API_KEY', '').strip()
-        self.allowed_ips = self._parse_allowed_ips(config.get('DEBUG_ALLOWED_IPS', ''))
-        self.log_debug_access = self._parse_bool(config.get('LOG_DEBUG_ACCESS', 'true'))
-        self.debug_header_name = config.get('DEBUG_HEADER_NAME', 'X-Debug-Key')
+        # 🔥 استخدام دوال التحويل الآمن
+        self.debug_enabled = self._safe_get_bool(config, 'DEBUG_ENABLED', False)
+        self.debug_api_key = self._safe_get_str(config, 'DEBUG_API_KEY', '').strip()
+        self.allowed_ips = self._parse_allowed_ips(self._safe_get_str(config, 'DEBUG_ALLOWED_IPS', ''))
+        self.log_debug_access = self._safe_get_bool(config, 'LOG_DEBUG_ACCESS', True)
+        self.debug_header_name = self._safe_get_str(config, 'DEBUG_HEADER_NAME', 'X-Debug-Key')
         
-        # إعدادات متقدمة
-        self.rate_limit_enabled = self._parse_bool(config.get('DEBUG_RATE_LIMIT_ENABLED', 'true'))
-        self.rate_limit_requests = int(config.get('DEBUG_RATE_LIMIT_REQUESTS', 60))
-        self.rate_limit_period = int(config.get('DEBUG_RATE_LIMIT_PERIOD', 60))
+        # إعدادات متقدمة مع تحويل آمن
+        self.rate_limit_enabled = self._safe_get_bool(config, 'DEBUG_RATE_LIMIT_ENABLED', True)
+        self.rate_limit_requests = self._safe_get_int(config, 'DEBUG_RATE_LIMIT_REQUESTS', 60)
+        self.rate_limit_period = self._safe_get_int(config, 'DEBUG_RATE_LIMIT_PERIOD', 60)
         
-        # تتبع الطلبات (للـ rate limiting)
+        # تتبع الطلبات مع Lock للـ Thread Safety
         self.request_tracker: Dict[str, list] = {}
+        self.tracker_lock = threading.Lock()
         
         # تسجيل حالة الحماية
         self._log_init_status()
     
-    def _parse_bool(self, value: Any) -> bool:
-        """تحويل القيمة إلى boolean"""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.lower() in ('true', 'yes', '1', 'on', 'y')
-        return bool(value)
+    # 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥
+    # ✅ دوال التحويل الآمن
+    # 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥
+    
+    def _safe_get_bool(self, config: dict, key: str, default: bool = False) -> bool:
+        """الحصول على قيمة منطقية آمنة"""
+        try:
+            value = config.get(key, default)
+            
+            if isinstance(value, bool):
+                return value
+            elif isinstance(value, str):
+                val_lower = value.lower().strip()
+                if val_lower in ('true', '1', 'yes', 'on', 'y', 't'):
+                    return True
+                elif val_lower in ('false', '0', 'no', 'off', 'n', 'f'):
+                    return False
+                else:
+                    return default
+            elif isinstance(value, (int, float)):
+                return bool(value)
+            else:
+                return default
+                
+        except Exception as e:
+            logger.warning(f"⚠️ فشل تحويل {key} إلى bool: {e}, استخدام الافتراضي: {default}")
+            return default
+    
+    def _safe_get_int(self, config: dict, key: str, default: int = 0) -> int:
+        """الحصول على قيمة عددية آمنة"""
+        try:
+            value = config.get(key, default)
+            
+            if isinstance(value, int):
+                return value
+            elif isinstance(value, str):
+                # إزالة أي أحرف غير رقمية
+                cleaned = ''.join(filter(str.isdigit, value))
+                if cleaned:
+                    return int(cleaned)
+                else:
+                    return default
+            elif isinstance(value, bool):
+                return 1 if value else 0
+            elif isinstance(value, float):
+                return int(value)
+            else:
+                return default
+                
+        except Exception as e:
+            logger.warning(f"⚠️ فشل تحويل {key} إلى int: {e}, استخدام الافتراضي: {default}")
+            return default
+    
+    def _safe_get_str(self, config: dict, key: str, default: str = '') -> str:
+        """الحصول على قيمة نصية آمنة"""
+        try:
+            value = config.get(key, default)
+            
+            if isinstance(value, str):
+                return value.strip()
+            elif value is not None:
+                return str(value).strip()
+            else:
+                return default
+                
+        except Exception as e:
+            logger.warning(f"⚠️ فشل تحويل {key} إلى str: {e}, استخدام الافتراضي: '{default}'")
+            return default
     
     def _parse_allowed_ips(self, ip_string: str) -> Set[str]:
         """تحليل قائمة IPs المسموح بها"""
@@ -77,36 +139,37 @@ class DebugGuard:
             logger.info("🔒 واجهات التصحيح معطلة تماماً")
     
     def _check_rate_limit(self, client_ip: str) -> bool:
-        """التحقق من rate limiting"""
+        """🔒 التحقق من rate limiting مع Thread Safety"""
         if not self.rate_limit_enabled:
             return True
         
         import time
         current_time = time.time()
         
-        # تنظيف الطلبات القديمة
-        if client_ip in self.request_tracker:
-            self.request_tracker[client_ip] = [
-                req_time for req_time in self.request_tracker[client_ip]
-                if current_time - req_time < self.rate_limit_period
-            ]
-        
-        # التحقق من الحد
-        request_count = len(self.request_tracker.get(client_ip, []))
-        if request_count >= self.rate_limit_requests:
-            logger.warning(f"🚫 تجاوز معدل الطلبات للـ IP: {client_ip} ({request_count}/{self.rate_limit_requests})")
-            return False
-        
-        # تسجيل الطلب
-        if client_ip not in self.request_tracker:
-            self.request_tracker[client_ip] = []
-        self.request_tracker[client_ip].append(current_time)
-        
-        # الحفاظ على حجم الذاكرة
-        if len(self.request_tracker[client_ip]) > self.rate_limit_requests * 2:
-            self.request_tracker[client_ip] = self.request_tracker[client_ip][-self.rate_limit_requests:]
-        
-        return True
+        with self.tracker_lock:
+            # تنظيف الطلبات القديمة
+            if client_ip in self.request_tracker:
+                self.request_tracker[client_ip] = [
+                    req_time for req_time in self.request_tracker[client_ip]
+                    if current_time - req_time < self.rate_limit_period
+                ]
+            
+            # التحقق من الحد
+            request_count = len(self.request_tracker.get(client_ip, []))
+            if request_count >= self.rate_limit_requests:
+                logger.warning(f"🚫 تجاوز معدل الطلبات للـ IP: {client_ip} ({request_count}/{self.rate_limit_requests})")
+                return False
+            
+            # تسجيل الطلب
+            if client_ip not in self.request_tracker:
+                self.request_tracker[client_ip] = []
+            self.request_tracker[client_ip].append(current_time)
+            
+            # الحفاظ على حجم الذاكرة
+            if len(self.request_tracker[client_ip]) > self.rate_limit_requests * 2:
+                self.request_tracker[client_ip] = self.request_tracker[client_ip][-self.rate_limit_requests:]
+            
+            return True
     
     def _safe_compare(self, a: str, b: str) -> bool:
         """مقارنة آمنة للسلسلات (لمنع timing attacks)"""
@@ -125,8 +188,29 @@ class DebugGuard:
                 result |= ord(x) ^ ord(y)
             return result == 0
     
+    def _get_client_ip(self) -> str:
+        """🔧 الحصول على IP العميل مع دعم Proxy"""
+        if not has_request_context():
+            return "SYSTEM"
+        
+        try:
+            # دعم Proxy (Cloud Run, Render, etc.)
+            if request.headers.get('X-Forwarded-For'):
+                # أخذ أول IP في القائمة
+                forwarded_ips = request.headers.get('X-Forwarded-For', '').split(',')
+                client_ip = forwarded_ips[0].strip()
+                if client_ip:
+                    return client_ip
+            
+            # استخدام remote_addr كحل بديل
+            return request.remote_addr or '0.0.0.0'
+            
+        except Exception as e:
+            logger.warning(f"⚠️ خطأ في الحصول على IP العميل: {e}")
+            return '0.0.0.0'
+    
     def is_access_allowed(self) -> bool:
-        """التحقق من السماح بالوصول"""
+        """✅ المحدث: التحقق من السماح بالوصول مع Request Context"""
         
         # إذا كان التصحيح معطلاً تماماً
         if not self.debug_enabled:
@@ -134,7 +218,7 @@ class DebugGuard:
                 logger.warning("🚫 محاولة وصول لواجهات تصحيح معطلة")
             return False
         
-        client_ip = request.remote_addr or '0.0.0.0'
+        client_ip = self._get_client_ip()
         
         # التحقق من IP إذا كان محدداً
         if self.allowed_ips and client_ip not in self.allowed_ips:
@@ -151,21 +235,22 @@ class DebugGuard:
             api_key = None
             
             # 1. من Header (المفضل)
-            api_key = request.headers.get(self.debug_header_name)
+            if has_request_context():
+                api_key = request.headers.get(self.debug_header_name)
             
-            # 2. من Query Parameter (للتجارب السريعة - غير آمن للإنتاج)
-            if not api_key and request.args.get('debug_key'):
+            # 2. من Query Parameter (للتجارب السريعة)
+            if not api_key and has_request_context() and request.args.get('debug_key'):
                 logger.warning(f"⚠️ استخدام query parameter للـ API Key من IP: {client_ip}")
                 api_key = request.args.get('debug_key')
             
             # 3. من Authorization Header
-            if not api_key and request.headers.get('Authorization'):
+            if not api_key and has_request_context() and request.headers.get('Authorization'):
                 auth_header = request.headers.get('Authorization', '')
                 if auth_header.startswith('Bearer '):
                     api_key = auth_header[7:]
             
             # 4. من Body (لطلبات POST فقط)
-            if not api_key and request.is_json:
+            if not api_key and has_request_context() and request.is_json:
                 data = request.get_json(silent=True) or {}
                 api_key = data.get('debug_key')
             
@@ -182,7 +267,7 @@ class DebugGuard:
         
         # تسجيل الوصول الناجح
         if self.log_debug_access:
-            logger.info(f"✅ وصول مصرح به للتصحيح من IP: {client_ip}, المسار: {request.path}")
+            logger.info(f"✅ وصول مصرح به للتصحيح من IP: {client_ip}")
         
         return True
     
@@ -197,7 +282,6 @@ class DebugGuard:
                     "error": "Unauthorized",
                     "message": "Debug APIs are disabled or require authentication",
                     "timestamp": self._get_timestamp(),
-                    "path": request.path,
                     "status": 403
                 }), 403
             
@@ -219,19 +303,27 @@ class DebugGuard:
         return datetime.now().isoformat()
     
     def get_debug_status(self) -> dict:
-        """الحصول على حالة التصحيح (لأغراض المراقبة فقط)"""
-        client_ip = request.remote_addr if request else None
-        
-        return {
-            "debug_enabled": self.debug_enabled,
-            "has_api_key": bool(self.debug_api_key),
-            "allowed_ips_count": len(self.allowed_ips),
-            "rate_limit_enabled": self.rate_limit_enabled,
-            "current_ip": client_ip,
-            "is_ip_allowed": client_ip in self.allowed_ips if self.allowed_ips else True,
-            "log_debug_access": self.log_debug_access,
-            "timestamp": self._get_timestamp()
-        }
+        """✅ المحدث: الحصول على حالة التصحيح مع Request Context"""
+        try:
+            client_ip = self._get_client_ip()
+            
+            return {
+                "debug_enabled": self.debug_enabled,
+                "has_api_key": bool(self.debug_api_key),
+                "allowed_ips_count": len(self.allowed_ips),
+                "rate_limit_enabled": self.rate_limit_enabled,
+                "current_ip": client_ip,
+                "is_ip_allowed": client_ip in self.allowed_ips if self.allowed_ips else True,
+                "log_debug_access": self.log_debug_access,
+                "has_request_context": has_request_context(),
+                "timestamp": self._get_timestamp()
+            }
+        except Exception as e:
+            logger.error(f"💥 خطأ في الحصول على حالة التصحيح: {e}")
+            return {
+                "error": str(e),
+                "timestamp": self._get_timestamp()
+            }
     
     def cleanup_old_requests(self):
         """تنظيف طلبات rate limiting القديمة"""
@@ -239,19 +331,20 @@ class DebugGuard:
         current_time = time.time()
         cleaned_count = 0
         
-        for ip in list(self.request_tracker.keys()):
-            initial_count = len(self.request_tracker[ip])
-            self.request_tracker[ip] = [
-                req_time for req_time in self.request_tracker[ip]
-                if current_time - req_time < self.rate_limit_period * 2
-            ]
-            
-            cleaned = initial_count - len(self.request_tracker[ip])
-            cleaned_count += cleaned
-            
-            # حذف IPs بدون طلبات
-            if not self.request_tracker[ip]:
-                del self.request_tracker[ip]
+        with self.tracker_lock:
+            for ip in list(self.request_tracker.keys()):
+                initial_count = len(self.request_tracker[ip])
+                self.request_tracker[ip] = [
+                    req_time for req_time in self.request_tracker[ip]
+                    if current_time - req_time < self.rate_limit_period * 2
+                ]
+                
+                cleaned = initial_count - len(self.request_tracker[ip])
+                cleaned_count += cleaned
+                
+                # حذف IPs بدون طلبات
+                if not self.request_tracker[ip]:
+                    del self.request_tracker[ip]
         
         if cleaned_count > 0:
             logger.debug(f"🧹 تم تنظيف {cleaned_count} طلب قديم من tracker")
