@@ -1,6 +1,7 @@
+# core/trade_manager.py - النسخة المحدثة
 # core/trade_manager.py
 # ==========================================================
-# ✅ TradeManager – النسخة النهائية المصححة
+# ✅ TradeManager – النسخة المحدثة مع دعم GroupMapper
 # ==========================================================
 
 import logging
@@ -26,7 +27,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class TradeManager:
-    """🎯 مدير التداول - لا يرسل إشعار إلا عند تحديد اتجاه واضح"""
+    """🎯 مدير التداول - مع دعم GroupMapper"""
     
     def __init__(self, config: dict):
         self.config = config
@@ -59,6 +60,15 @@ class TradeManager:
             lambda: deque(maxlen=200)
         )
         
+        # ✅ إضافة GroupMapper
+        try:
+            from .group_mapper import GroupMapper
+            self.group_mapper = GroupMapper()
+            logger.info("✅ TradeManager مع دعم GroupMapper")
+        except ImportError as e:
+            logger.warning(f"⚠️ GroupMapper غير متوفر: {e}")
+            self.group_mapper = None
+        
         # External managers
         self.group_manager = None
         self.notification_manager = None
@@ -80,7 +90,7 @@ class TradeManager:
                 self.redis = None
                 self.redis_enabled = False
         
-        logger.info("✅ TradeManager initialized – Saudi Time 🇸🇦")
+        logger.info("✅ TradeManager المحدث جاهز – مع دعم GroupMapper 🇸🇦")
     
     # ======================================================
     # 🔗 Required by TradingSystem
@@ -92,19 +102,39 @@ class TradeManager:
         self.notification_manager = notification_manager
     
     # ======================================================
-    # 🔧 Required by GroupManager
+    # 🔧 Required by GroupManager - ✅ المحدث مع GroupMapper
     # ======================================================
     def count_trades_by_mode(self, symbol: str, mode_key: str) -> int:
-        """عدد الصفقات المفتوحة للنمط"""
+        """✅ المحدث: عدد الصفقات المفتوحة للنمط مع دعم GroupMapper"""
         try:
             with self.trade_lock:
-                return sum(
-                    1 for trade in self.active_trades.values()
-                    if trade.get("symbol") == symbol
-                    and trade.get("mode") == mode_key
-                )
+                count = 0
+                
+                # إذا كان GroupMapper متوفراً
+                if self.group_mapper:
+                    # استخراج القاعدة من mode_key
+                    base_name, _ = self.group_mapper.extract_base_and_direction(mode_key)
+                    
+                    for trade in self.active_trades.values():
+                        if trade.get("symbol") == symbol:
+                            trade_mode = trade.get("mode", "")
+                            trade_base, _ = self.group_mapper.extract_base_and_direction(trade_mode)
+                            
+                            if trade_base == base_name:
+                                count += 1
+                else:
+                    # الطريقة القديمة (للتوافق)
+                    count = sum(
+                        1 for trade in self.active_trades.values()
+                        if trade.get("symbol") == symbol
+                        and trade.get("mode") == mode_key
+                    )
+                
+                logger.debug(f"🔍 count_trades_by_mode: {symbol} -> {mode_key} = {count}")
+                return count
+                
         except Exception as e:
-            logger.error(f"count_trades_by_mode failed: {e}")
+            self._handle_error("count_trades_by_mode failed", e)
             return 0
     
     def get_active_trades_count(self, symbol: str = None) -> int:
@@ -119,23 +149,31 @@ class TradeManager:
                 else:
                     return len(self.active_trades)
         except Exception as e:
-            logger.error(f"get_active_trades_count failed: {e}")
+            self._handle_error("get_active_trades_count failed", e)
             return 0
     
     def open_trade(self, symbol: str, direction: str, strategy_type: str, mode_key: str) -> bool:
-        """فتح صفقة جديدة"""
+        """✅ المحدث: فتح صفقة جديدة مع GroupMapper"""
         try:
             trade_id = f"{symbol}_{direction}_{saudi_time.now().strftime('%Y%m%d%H%M%S')}_{hash(strategy_type) % 10000:04d}"
             
             with self.trade_lock:
+                # ✅ استخدام GroupMapper لتوحيد mode_key إذا كان متوفراً
+                normalized_mode = mode_key
+                if self.group_mapper:
+                    normalized_mode = self.group_mapper.normalize_group_name(mode_key, direction)
+                    logger.debug(f"🔍 توحيد mode_key: {mode_key} -> {normalized_mode}")
+                
                 trade_info = {
                     'id': trade_id,
                     'symbol': symbol,
                     'direction': direction,
                     'strategy_type': strategy_type,
-                    'mode': mode_key,
+                    'mode': normalized_mode,  # ✅ استخدام الاسم الموحد
+                    'original_mode': mode_key,  # حفظ الاسم الأصلي
                     'opened_at': saudi_time.isoformat(),
-                    'timezone': 'Asia/Riyadh 🇸🇦'
+                    'timezone': 'Asia/Riyadh 🇸🇦',
+                    'group_mapper_used': self.group_mapper is not None
                 }
                 
                 self.active_trades[trade_id] = trade_info
@@ -143,7 +181,7 @@ class TradeManager:
                 self.total_trade_counter += 1
                 self.metrics["trades_opened"] += 1
                 
-                logger.info(f"✅ تم فتح صفقة: {trade_id}")
+                logger.info(f"✅ تم فتح صفقة: {trade_id} (mode: {normalized_mode})")
                 return True
                 
         except Exception as e:
@@ -165,7 +203,7 @@ class TradeManager:
             
             if closed:
                 self.metrics["trades_closed"] += closed
-                logger.info(f"🔚 تم إغلاق {closed} صفقة لـ {symbol}")
+                logger.info(f"🔚 تم إغلاق {closed} صفقة لـ {symbol}: {reason}")
         
         except Exception as e:
             logger.error(f"handle_exit_signal failed: {e}")
@@ -395,6 +433,7 @@ class TradeManager:
                 "signals_in_pool": len(pool["signals"]),
                 "signal_analysis": signal_analysis,
                 "required_signals": self.config.get("TREND_REQUIRED_SIGNALS", 2),
+                "group_mapper_available": self.group_mapper is not None,
                 "timestamp": saudi_time.isoformat(),
                 "timezone": "Asia/Riyadh 🇸🇦"
             }
@@ -544,6 +583,7 @@ class TradeManager:
                 'total_trades_opened': self.metrics["trades_opened"],
                 'total_trades_closed': self.metrics["trades_closed"],
                 'redis_enabled': self.redis_enabled,
+                'group_mapper_available': self.group_mapper is not None,
                 'error_log_size': len(self._error_log),
                 'timestamp': saudi_time.isoformat(),
                 'timezone': 'Asia/Riyadh 🇸🇦'
