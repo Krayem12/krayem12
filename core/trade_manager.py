@@ -79,7 +79,7 @@ class TradeManager:
 
         # Trend buffers
         self.trend_pool: Dict[str, dict] = defaultdict(lambda: {
-            "signals": {},
+            "signals": {},   # ✅ will store signal_type -> direction
             "count": 0
         })
         self.trend_history: Dict[str, deque] = defaultdict(
@@ -160,7 +160,7 @@ class TradeManager:
         """فتح صفقة جديدة"""
         try:
             trade_id = f"{symbol}_{direction}_{saudi_time.now().strftime('%Y%m%d%H%M%S')}_{hash(strategy_type) % 10000:04d}"
-            
+
             with self.trade_lock:
                 trade_info = {
                     'id': trade_id,
@@ -171,15 +171,15 @@ class TradeManager:
                     'opened_at': saudi_time.now().isoformat(),
                     'timezone': 'Asia/Riyadh 🇸🇦'
                 }
-                
+
                 self.active_trades[trade_id] = trade_info
                 self.symbol_trade_count[symbol] += 1
                 self.total_trade_counter += 1
                 self.metrics["trades_opened"] += 1
-                
+
                 logger.info(f"✅ تم فتح صفقة: {trade_id} - التوقيت السعودي 🇸🇦")
                 return True
-                
+
         except Exception as e:
             self._handle_error("open_trade", e)
             return False
@@ -243,31 +243,48 @@ class TradeManager:
                 pool = self.trend_pool[symbol]
 
                 signal_type = (signal_data.get("signal_type") or "").strip()
-                if signal_type:
-                    pool["signals"][signal_type] = True
+                if not signal_type:
+                    return False, old_trend, []
 
+                # ✅ FIX: store direction per signal (not True)
+                pool["signals"][signal_type] = direction
+
+                # ✅ FIX: read the correct env key (fallback to old key for compatibility)
                 required = int(
-                    self.config.get("TREND_CHANGE_THRESHOLD", 2)
+                    self.config.get("TREND_REQUIRED_SIGNALS",
+                                    self.config.get("TREND_CHANGE_THRESHOLD", 2))
                 )
+
+                # Not enough confirmations yet
                 if len(pool["signals"]) < required:
                     return False, old_trend, []
 
+                # ✅ FIX: prevent conflicting trend signals from changing trend
+                directions = set(pool["signals"].values())
+                if len(directions) != 1:
+                    logger.warning(f"⚠️ Trend conflict for {symbol}: {pool['signals']}")
+                    # reset pool to avoid stale mixed signals
+                    self.trend_pool[symbol] = {"signals": {}, "count": 0}
+                    return False, old_trend, []
+
+                new_trend = directions.pop()
+
                 # Confirm change
                 self.previous_trend[symbol] = old_trend
-                self.current_trend[symbol] = direction
-                self.last_reported_trend[symbol] = direction
+                self.current_trend[symbol] = new_trend
+                self.last_reported_trend[symbol] = new_trend
                 self.trend_strength[symbol] += 1
 
                 self.trend_history[symbol].append({
                     "time": saudi_time.now().isoformat(),
                     "old": old_trend,
-                    "new": direction,
+                    "new": new_trend,
                     "signals": list(pool["signals"].keys())
                 })
 
                 if self.redis_enabled:
                     try:
-                        self.redis.set_trend(symbol, direction)
+                        self.redis.set_trend(symbol, new_trend)
                         self._redis_set_raw(
                             f"trend_updated_at:{symbol}",
                             saudi_time.now().isoformat()
@@ -278,7 +295,7 @@ class TradeManager:
                 used = list(pool["signals"].keys())
                 self.trend_pool[symbol] = {"signals": {}, "count": 0}
 
-                return old_trend != direction, old_trend, used
+                return old_trend != new_trend, old_trend, used
 
         except Exception as e:
             self._handle_error("update_trend", e)
