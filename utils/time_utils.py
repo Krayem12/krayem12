@@ -1,44 +1,41 @@
+"""
+📅 أدوات الوقت مع التوقيت السعودي
+"""
+
 import pytz
 from datetime import datetime
+from typing import Optional
 
 class SaudiTime:
-    """أدوات الوقت بالتوقيت السعودي"""
+    """فئة إدارة الوقت بالتوقيت السعودي"""
     
-    def __init__(self):
-        self.timezone = pytz.timezone('Asia/Riyadh')
+    _timezone = pytz.timezone('Asia/Riyadh')
     
-    def now(self):
-        """الحصول على التوقيت السعودي الحالي"""
-        return datetime.now(self.timezone)
+    @classmethod
+    def now(cls) -> datetime:
+        """الحصول على الوقت الحالي بالتوقيت السعودي"""
+        return datetime.now(cls._timezone)
     
-    def from_utc(self, utc_dt):
+    @classmethod
+    def isoformat(cls, dt: Optional[datetime] = None) -> str:
+        """تنسيق الوقت بتنسيق ISO"""
+        if dt is None:
+            dt = cls.now()
+        return dt.isoformat()
+    
+    @classmethod
+    def format_time(cls, dt: Optional[datetime] = None, format_str: str = '%Y-%m-%d %I:%M:%S %p') -> str:
+        """تنسيق الوقت حسب الشكل المطلوب"""
+        if dt is None:
+            dt = cls.now()
+        return dt.strftime(format_str)
+    
+    @classmethod
+    def utc_to_saudi(cls, utc_dt: datetime) -> datetime:
         """تحويل من UTC إلى التوقيت السعودي"""
         if utc_dt.tzinfo is None:
             utc_dt = pytz.utc.localize(utc_dt)
-        return utc_dt.astimezone(self.timezone)
-    
-    def format_time(self, dt=None):
-        """تنسيق الوقت بشكل جميل"""
-        if dt is None:
-            dt = self.now()
-        return dt.strftime('%Y-%m-%d %I:%M:%S %p')
-    
-    def format_time_24h(self, dt=None):
-        """تنسيق الوقت بنظام 24 ساعة"""
-        if dt is None:
-            dt = self.now()
-        return dt.strftime('%Y-%m-%d %H:%M:%S')
-    
-    def get_timezone_info(self):
-        """الحصول على معلومات النطاق الزمني"""
-        current_time = self.now()
-        return {
-            'timezone': 'Asia/Riyadh',
-            'offset': current_time.strftime('%z'),
-            'name': current_time.strftime('%Z'),
-            'current_time': self.format_time(),
-            'current_time_24h': self.format_time_24h()
-        }
+        return utc_dt.astimezone(cls._timezone)
 
-# إنشاء نسخة عامة للاستخدام
+# إنشاء نسخة واحدة للاستخدام
 saudi_time = SaudiTime()
